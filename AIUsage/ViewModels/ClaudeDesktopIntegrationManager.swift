@@ -169,8 +169,8 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         )
         guard !catalog.isEmpty else {
             state = .failed(AppSettings.shared.t(
-                "This node has no usable models. Add a model to its Model Library first.",
-                "该节点没有可用模型，请先在模型库中添加模型。"
+                "This node has no usable models. Sync or add an available model first.",
+                "该节点没有可用模型，请先同步或添加可用模型。"
             ))
             return
         }
@@ -354,10 +354,9 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             ))
             return
         }
-        // Smart mode keeps the public IDs/display names stable, so a normal
-        // node switch remains Gateway-only. Full-catalog mode deliberately
-        // changes the visible profile surface and therefore reloads a running
-        // Desktop after the Gateway has already switched upstream.
+        // Hot-switch mode keeps one stable four-route surface. Full-catalog
+        // mode exposes node-owned models, so a node/catalog change may alter
+        // the visible surface and require a Desktop reload.
         let visibleCatalogChanged = !configuredModels.isEmpty
             && profileSurface(of: configuredModels) != profileSurface(of: catalog)
         let shouldReloadDesktop = visibleCatalogChanged && ClaudeDesktopAppController.isRunning

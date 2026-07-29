@@ -149,7 +149,7 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
                     mode: mode,
                     routes: codeModels
                 ),
-                mode == .smartRoutes ? "desktop" : "code",
+                "code",
                 mode == .smartRoutes
             )
         case .desktop:

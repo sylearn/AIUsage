@@ -316,9 +316,8 @@ struct ProxySettings: Codable, Equatable {
     var maxOutputTokens: Int
     var defaultModel: String
     var modelMapping: ProxyConfiguration.ModelMapping
-    /// 模型库（模型名 + 独立定价，与 OpenCode modelEntries 同构）。定价唯一来源；
-    /// 槽位/默认模型从库中点选切换。可选以兼容旧档（nil/空 = 回退槽位价格）。
-    var modelLibrary: [ProxyConfiguration.MappedModel]?
+    /// 节点模型目录：可用模型与费用规则分离，费用规则缺失即“未定价”。
+    var modelCatalog: ProxyConfiguration.ModelCatalog
 
     var anthropicBaseURL: String
     var anthropicAPIKey: String
@@ -396,7 +395,7 @@ struct ProxySettings: Codable, Equatable {
         maxOutputTokens = config.maxOutputTokens
         defaultModel = config.defaultModel
         modelMapping = config.modelMapping
-        modelLibrary = config.modelLibrary.isEmpty ? nil : config.modelLibrary
+        modelCatalog = config.modelCatalog
         anthropicBaseURL = config.anthropicBaseURL
         anthropicAPIKey = config.anthropicAPIKey
         usePassthroughProxy = config.usePassthroughProxy
@@ -412,7 +411,7 @@ struct ProxySettings: Codable, Equatable {
         upstreamAPIKey: String, expectedClientKey: String,
         maxOutputTokens: Int, defaultModel: String,
         modelMapping: ProxyConfiguration.ModelMapping,
-        modelLibrary: [ProxyConfiguration.MappedModel]? = nil,
+        modelCatalog: ProxyConfiguration.ModelCatalog = .empty,
         anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool,
         enableModelAliasMapping: Bool = false,
         enableHTTPS: Bool? = nil, httpsPort: Int? = nil,
@@ -429,7 +428,7 @@ struct ProxySettings: Codable, Equatable {
         self.maxOutputTokens = maxOutputTokens
         self.defaultModel = defaultModel
         self.modelMapping = modelMapping
-        self.modelLibrary = modelLibrary
+        self.modelCatalog = modelCatalog
         self.anthropicBaseURL = anthropicBaseURL
         self.anthropicAPIKey = anthropicAPIKey
         self.usePassthroughProxy = usePassthroughProxy
@@ -438,6 +437,89 @@ struct ProxySettings: Codable, Equatable {
         self.httpsPort = httpsPort
         self.commonConfigMode = commonConfigMode
         self.extraTOML = extraTOML
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case host, port, allowLAN
+        case upstreamBaseURL, openAIUpstreamAPI, upstreamAPIKey, expectedClientKey
+        case maxOutputTokens, defaultModel, modelMapping, modelCatalog
+        case modelLibrary // 0.15.x 及更早，仅解码迁移
+        case anthropicBaseURL, anthropicAPIKey, usePassthroughProxy
+        case enableModelAliasMapping, enableHTTPS, httpsPort
+        case commonConfigMode, extraTOML
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        host = try container.decodeIfPresent(String.self, forKey: .host) ?? "127.0.0.1"
+        port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 8080
+        allowLAN = try container.decodeIfPresent(Bool.self, forKey: .allowLAN) ?? false
+        upstreamBaseURL = ClaudeProxyConfiguration.normalizeOpenAIBaseURL(
+            try container.decodeIfPresent(String.self, forKey: .upstreamBaseURL) ?? "https://api.openai.com"
+        )
+        openAIUpstreamAPI = try container.decodeIfPresent(OpenAIUpstreamAPI.self, forKey: .openAIUpstreamAPI) ?? .chatCompletions
+        upstreamAPIKey = try container.decodeIfPresent(String.self, forKey: .upstreamAPIKey) ?? ""
+        expectedClientKey = try container.decodeIfPresent(String.self, forKey: .expectedClientKey) ?? ""
+        maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens) ?? 0
+        defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? ""
+
+        let legacyMapping = try container.decodeIfPresent(
+            ProxyConfiguration.LegacyModelMapping.self,
+            forKey: .modelMapping
+        ) ?? ProxyConfiguration.LegacyModelMapping(current: .openAIDefault)
+        modelMapping = legacyMapping.current
+
+        if let currentCatalog = try container.decodeIfPresent(
+            ProxyConfiguration.ModelCatalog.self,
+            forKey: .modelCatalog
+        ) {
+            modelCatalog = .init(
+                models: currentCatalog.models,
+                pricingOverrides: currentCatalog.pricingOverrides
+            )
+        } else {
+            let legacyLibrary = try container.decodeIfPresent(
+                [ProxyConfiguration.MappedModel].self,
+                forKey: .modelLibrary
+            ) ?? []
+            modelCatalog = .migrated(
+                legacyLibrary: legacyLibrary,
+                legacyMapping: legacyMapping,
+                defaultModel: defaultModel
+            )
+        }
+
+        anthropicBaseURL = try container.decodeIfPresent(String.self, forKey: .anthropicBaseURL) ?? "https://api.anthropic.com"
+        anthropicAPIKey = try container.decodeIfPresent(String.self, forKey: .anthropicAPIKey) ?? ""
+        usePassthroughProxy = try container.decodeIfPresent(Bool.self, forKey: .usePassthroughProxy) ?? false
+        enableModelAliasMapping = try container.decodeIfPresent(Bool.self, forKey: .enableModelAliasMapping)
+        enableHTTPS = try container.decodeIfPresent(Bool.self, forKey: .enableHTTPS)
+        httpsPort = try container.decodeIfPresent(Int.self, forKey: .httpsPort)
+        commonConfigMode = try container.decodeIfPresent(CommonConfigMode.self, forKey: .commonConfigMode)
+        extraTOML = try container.decodeIfPresent(String.self, forKey: .extraTOML)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(host, forKey: .host)
+        try container.encode(port, forKey: .port)
+        try container.encode(allowLAN, forKey: .allowLAN)
+        try container.encode(upstreamBaseURL, forKey: .upstreamBaseURL)
+        try container.encode(openAIUpstreamAPI, forKey: .openAIUpstreamAPI)
+        try container.encode(upstreamAPIKey, forKey: .upstreamAPIKey)
+        try container.encode(expectedClientKey, forKey: .expectedClientKey)
+        try container.encode(maxOutputTokens, forKey: .maxOutputTokens)
+        try container.encode(defaultModel, forKey: .defaultModel)
+        try container.encode(modelMapping, forKey: .modelMapping)
+        try container.encode(modelCatalog, forKey: .modelCatalog)
+        try container.encode(anthropicBaseURL, forKey: .anthropicBaseURL)
+        try container.encode(anthropicAPIKey, forKey: .anthropicAPIKey)
+        try container.encode(usePassthroughProxy, forKey: .usePassthroughProxy)
+        try container.encodeIfPresent(enableModelAliasMapping, forKey: .enableModelAliasMapping)
+        try container.encodeIfPresent(enableHTTPS, forKey: .enableHTTPS)
+        try container.encodeIfPresent(httpsPort, forKey: .httpsPort)
+        try container.encodeIfPresent(commonConfigMode, forKey: .commonConfigMode)
+        try container.encodeIfPresent(extraTOML, forKey: .extraTOML)
     }
 
     var bindAddress: String { allowLAN ? "0.0.0.0" : host }
@@ -456,44 +538,20 @@ struct ProxySettings: Codable, Equatable {
         (commonConfigMode ?? .followGlobal).shouldMerge(globalEnabled: globalEnabled)
     }
 
-    /// 计价查询与 ProxyConfiguration.pricingForModel 同序：库精确 → 槽位精确 → 家族。
-    /// 实际运行时计价走 toProxyConfiguration 后的副本，此处保持一致仅为直接调用方。
+    /// 费用规则仅按真实模型名精确匹配；没有规则即未定价。
     func pricingForModel(_ model: String) -> ProxyConfiguration.ModelPricing? {
-        if let p = modelLibrary?.first(where: { $0.name == model })?.pricing { return p }
-        if let p = modelMapping.pricingForUpstreamModel(model) { return p }
-        if let p = modelMapping.pricingForFamily(of: model) { return p }
-        return nil
+        modelCatalog.pricingOverrides[model.trimmingCharacters(in: .whitespacesAndNewlines)]
     }
 
-    /// 保存前把库价格回写到同名槽位，保证仍直接读槽位价格的旧回退路径与库一致。
-    mutating func syncSlotPricingFromLibrary() {
-        guard let library = modelLibrary, !library.isEmpty else { return }
-        func sync(_ slot: inout ProxyConfiguration.MappedModel) {
-            if let match = library.first(where: { $0.name == slot.name }) {
-                slot.pricing = match.pricing
-            }
-        }
-        sync(&modelMapping.bigModel)
-        sync(&modelMapping.middleModel)
-        sync(&modelMapping.smallModel)
-    }
-
-    /// 旧档案迁移：模型库为空时用现有槽位（名称+价格）与主模型播种，
-    /// 编辑器打开即看到完整库，保存后落盘完成迁移。
-    mutating func seedModelLibraryIfEmpty() {
-        guard (modelLibrary ?? []).isEmpty else { return }
-        var seen = Set<String>()
-        var seeded: [ProxyConfiguration.MappedModel] = []
-        for slot in [modelMapping.bigModel, modelMapping.middleModel, modelMapping.smallModel] {
-            let name = slot.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, seen.insert(name).inserted else { continue }
-            seeded.append(.init(name: name, pricing: slot.pricing))
-        }
-        let dm = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !dm.isEmpty, seen.insert(dm).inserted {
-            seeded.append(.init(name: dm, pricing: .zero))
-        }
-        modelLibrary = seeded.isEmpty ? nil : seeded
+    /// 新节点或缺少目录的旧节点用应用映射名称播种；不会自动创建费用规则。
+    mutating func seedModelCatalogIfEmpty() {
+        guard modelCatalog.models.isEmpty else { return }
+        modelCatalog.mergeModels([
+            defaultModel,
+            modelMapping.bigModel.name,
+            modelMapping.middleModel.name,
+            modelMapping.smallModel.name,
+        ])
     }
 
     /// Build the env config that will be written to settings.json.
@@ -543,7 +601,7 @@ struct ProxySettings: Codable, Equatable {
             expectedClientKey: expectedClientKey,
             defaultModel: defaultModel,
             modelMapping: modelMapping,
-            modelLibrary: modelLibrary ?? [],
+            modelCatalog: modelCatalog,
             maxOutputTokens: maxOutputTokens,
             createdAt: metadata.createdAt,
             lastUsedAt: metadata.lastUsedAt,

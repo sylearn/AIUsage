@@ -4,7 +4,7 @@ import QuotaBackend
 // MARK: - Codex Proxy Editor
 // Codex 节点编辑器（单模型）。把 OpenAI 兼容上游接入 Codex：激活时写 ~/.codex/config.toml
 // 的 model / model_provider=aiusage-proxy + [model_providers.aiusage-proxy]，本地起 QuotaServer。
-// 单模型 + 价格存进 modelMapping.bigModel（复用现成定价/统计机制），middle/small 留空。
+// 单模型写入 modelMapping.bigModel；可用目录与可选费用规则独立保存。
 
 struct CodexProxyEditorView: View {
     @EnvironmentObject var viewModel: ProxyViewModel
@@ -15,6 +15,7 @@ struct CodexProxyEditorView: View {
     @State private var isNew: Bool
     @StateObject private var modelFetch = ModelFetchState()
     @State private var pricingCurrency: ProxyConfiguration.PricingCurrency
+    @State private var isPricingEditorPresented = false
     @State private var extraTOMLCheck: TOMLCheckResult = .ok
 
     init(profile: NodeProfile? = nil) {
@@ -22,16 +23,16 @@ struct CodexProxyEditorView: View {
             var p = profile
             // Codex 固定使用 Responses（其 wire_api），纠正历史误存的 chat_completions。
             p.metadata.proxy.openAIUpstreamAPI = .responses
-            // 旧档案迁移：库为空时用单模型价格播种。
-            p.metadata.proxy.seedModelLibraryIfEmpty()
+            p.metadata.proxy.seedModelCatalogIfEmpty()
             _profile = State(initialValue: p)
             _isNew = State(initialValue: false)
-            _pricingCurrency = State(initialValue: p.metadata.proxy.modelLibrary?.first?.pricing.currency
-                ?? p.metadata.proxy.modelMapping.bigModel.pricing.currency)
+            _pricingCurrency = State(
+                initialValue: p.metadata.proxy.modelCatalog.pricingOverrides.values.first?.currency ?? .usd
+            )
             _extraTOMLCheck = State(initialValue: TOMLLinter.validate(p.metadata.proxy.extraTOML ?? ""))
         } else {
             var newProfile = NodeProfile.defaultProfile(nodeType: .codexProxy)
-            newProfile.metadata.proxy.seedModelLibraryIfEmpty()
+            newProfile.metadata.proxy.seedModelCatalogIfEmpty()
             _profile = State(initialValue: newProfile)
             _isNew = State(initialValue: true)
             _pricingCurrency = State(initialValue: .usd)
@@ -42,11 +43,12 @@ struct CodexProxyEditorView: View {
     init(config: ProxyConfiguration) {
         var p = NodeProfile.fromLegacyConfiguration(config)
         p.metadata.proxy.openAIUpstreamAPI = .responses
-        p.metadata.proxy.seedModelLibraryIfEmpty()
+        p.metadata.proxy.seedModelCatalogIfEmpty()
         _profile = State(initialValue: p)
         _isNew = State(initialValue: false)
-        _pricingCurrency = State(initialValue: p.metadata.proxy.modelLibrary?.first?.pricing.currency
-            ?? config.modelMapping.bigModel.pricing.currency)
+        _pricingCurrency = State(
+            initialValue: p.metadata.proxy.modelCatalog.pricingOverrides.values.first?.currency ?? .usd
+        )
     }
 
     var body: some View {
@@ -79,6 +81,12 @@ struct CodexProxyEditorView: View {
             footerBar
         }
         .frame(width: 750, height: 800)
+        .sheet(isPresented: $isPricingEditorPresented) {
+            pricingRulesSheet
+        }
+        .onChange(of: modelFetch.availableModels) { _, models in
+            profile.metadata.proxy.modelCatalog.mergeModels(models)
+        }
     }
 
     // MARK: - Header / Footer
@@ -233,33 +241,16 @@ struct CodexProxyEditorView: View {
         sectionCard(title: L("Model & Pricing", "模型与定价")) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(L("Model", "模型")).font(.subheadline.weight(.semibold))
-                HStack(spacing: 6) {
-                    modelTextField(text: $profile.metadata.proxy.modelMapping.bigModel.name, placeholder: "gpt-5.5")
-                    ModelLibrarySlotPicker(
-                        selection: $profile.metadata.proxy.modelMapping.bigModel.name,
-                        library: currentModelLibrary
-                    )
-                }
+                modelTextField(text: $profile.metadata.proxy.modelMapping.bigModel.name, placeholder: "gpt-5.5")
                 Text(L(
-                    "Written as `model` in config.toml, used as the upstream model name and the pricing key for stats. Switchable from the node card when the library has multiple models.",
-                    "将写入 config.toml 的 `model`，同时作为上游模型名与统计定价键。模型库有多个模型时，节点卡片上可随时切换。"
+                    "Written as `model` in config.toml and used as the exact upstream model name. Switchable from the node card when the catalog has multiple models.",
+                    "将写入 config.toml 的 `model`，并作为真实上游模型名；模型目录有多个模型时可在节点卡片上切换。"
                 ))
                 .font(.caption2).foregroundStyle(.tertiary)
             }
 
             Divider()
-
-            ProxyModelLibraryEditor(
-                library: Binding(
-                    get: { profile.metadata.proxy.modelLibrary ?? [] },
-                    set: { profile.metadata.proxy.modelLibrary = $0.isEmpty ? nil : $0 }
-                ),
-                currency: $pricingCurrency,
-                modelFetch: modelFetch
-            )
-            .onChange(of: pricingCurrency) { _, newCurrency in
-                profile.metadata.proxy.modelMapping.bigModel.pricing.currency = newCurrency
-            }
+            costRulesSummary
 
             Divider()
 
@@ -274,9 +265,65 @@ struct CodexProxyEditorView: View {
         }
     }
 
-    /// 槽位下拉用的当前模型库（已过滤空名）。
-    private var currentModelLibrary: [ProxyConfiguration.MappedModel] {
-        (profile.metadata.proxy.modelLibrary ?? []).filter { !$0.name.isEmpty }
+    private var currentModelCatalog: [String] {
+        profile.metadata.proxy.modelCatalog.models.filter { !$0.isEmpty }
+    }
+
+    private var costRulesSummary: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "chart.line.text.clipboard")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L("Cost Estimates", "费用估算"))
+                    .font(.subheadline.weight(.semibold))
+                Text(L(
+                    "\(profile.metadata.proxy.modelCatalog.pricingOverrides.count) rules · optional",
+                    "已设置 \(profile.metadata.proxy.modelCatalog.pricingOverrides.count) 条 · 可选"
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(L("Configure…", "设置…")) {
+                isPricingEditorPresented = true
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.035)))
+    }
+
+    private var pricingRulesSheet: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L("Cost Estimate Rules", "费用估算规则"))
+                        .font(.title3.weight(.bold))
+                    Text(L(
+                        "Prices are optional and never affect model availability.",
+                        "价格为可选项，不会影响模型是否可用。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(L("Done", "完成")) { isPricingEditorPresented = false }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(18)
+            Divider()
+            ScrollView {
+                ProxyPricingRulesEditor(
+                    catalog: $profile.metadata.proxy.modelCatalog,
+                    currency: $pricingCurrency
+                )
+                .padding(16)
+            }
+        }
+        .frame(width: 760, height: 560)
     }
 
     // MARK: - Security
@@ -354,7 +401,12 @@ struct CodexProxyEditorView: View {
     }
 
     private func modelTextField(text: Binding<String>, placeholder: String) -> some View {
-        ModelSuggestionField(text: text, placeholder: placeholder, state: modelFetch)
+        ModelSuggestionField(
+            text: text,
+            placeholder: placeholder,
+            state: modelFetch,
+            catalogModels: currentModelCatalog
+        )
     }
 
     // MARK: - Validation / Save
@@ -383,9 +435,9 @@ struct CodexProxyEditorView: View {
         profile.metadata.proxy.modelMapping.middleModel.name = ""
         profile.metadata.proxy.modelMapping.smallModel.name = ""
         profile.metadata.proxy.defaultModel = model
+        profile.metadata.proxy.modelCatalog.mergeModels([model])
         profile.metadata.proxy.expectedClientKey = profile.metadata.proxy.expectedClientKey
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        profile.metadata.proxy.syncSlotPricingFromLibrary()
         profile.syncEnvFromProxy()
         // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
         profile = APIProviderDistributor.shared.stampOverrides(profile)

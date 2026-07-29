@@ -14,8 +14,8 @@ struct ClaudeDesktopCatalogEntry: Equatable, Identifiable {
     let supports1M: Bool
 }
 
-/// The exact model values passed into a Claude product Gateway. Smart routes
-/// are stable app-facing IDs; a full catalog passes real upstream IDs.
+/// The exact model values passed into a Claude product Gateway. Smart mode
+/// exposes stable app routes; full mode exposes only real node model IDs.
 struct ClaudeProductGatewayCatalogProjection {
     let availableModels: [String]
     let defaultModel: String?
@@ -103,10 +103,13 @@ final class ClaudeDesktopProfileStore {
     /// entries when users alternate between AIUsage and another profile tool.
     static let profileID = "a1a5a9e0-7c1d-4e5f-9a0b-c1d2e3f4a5b6"
     static let profileName = "AIUsage Gateway"
-    static let defaultRouteID = "claude-default-4-6-aiusage-v1"
-    static let opusRouteID = "claude-opus-4-6-aiusage-v1"
-    static let sonnetRouteID = "claude-sonnet-4-6-aiusage-v1"
-    static let haikuRouteID = "claude-haiku-4-5-aiusage-v1"
+    // Both Claude products use the same compact Claude-shaped wire IDs. Code
+    // receives friendly display metadata, so these remain an implementation
+    // detail while also surviving Desktop's stricter model-ID validation.
+    static let defaultRouteID = "claude-aiusage"
+    static let opusRouteID = "claude-aiusage-opus"
+    static let sonnetRouteID = "claude-aiusage-sonnet"
+    static let haikuRouteID = "claude-aiusage-haiku"
 
     struct Paths {
         let normalConfig: URL
@@ -177,57 +180,34 @@ final class ClaudeDesktopProfileStore {
         supports1M: Set<String> = [],
         routes: ClaudeAppResolvedModels? = nil
     ) -> [ClaudeDesktopCatalogEntry] {
+        let resolved = resolvedRoutes(for: node, routes: routes)
+        let routeEntries = productRouteEntries(resolved: resolved, supports1M: supports1M)
         switch mode {
         case .smartRoutes:
-            let resolved = routes ?? ClaudeAppResolvedModels(
-                defaultModel: node.defaultModel,
-                opus: node.modelMapping.bigModel.name,
-                sonnet: node.modelMapping.middleModel.name,
-                haiku: node.modelMapping.smallModel.name
-            )
-            // Code and Desktop keep these four public identities for the
-            // lifetime of the integration. Only their Gateway projections change.
-            let routes: [(id: String, upstream: String, label: String)] = [
-                (Self.defaultRouteID, resolved.defaultModel, "AIUsage Default"),
-                (Self.opusRouteID, resolved.opus, "AIUsage Opus"),
-                (Self.sonnetRouteID, resolved.sonnet, "AIUsage Sonnet"),
-                (Self.haikuRouteID, resolved.haiku, "AIUsage Haiku"),
-            ]
-            return routes.compactMap { route in
-                let upstream = route.upstream.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !upstream.isEmpty else { return nil }
-                return ClaudeDesktopCatalogEntry(
-                    id: route.id,
-                    upstreamModel: upstream,
-                    displayName: route.label,
-                    supports1M: supports1M.contains(upstream)
-                )
-            }
+            return routeEntries
 
         case .fullNodeCatalog:
-            var upstreamModels = node.modelLibrary.map(\.name)
-            if upstreamModels.isEmpty {
-                upstreamModels = [
-                    node.defaultModel,
-                    node.modelMapping.bigModel.name,
-                    node.modelMapping.middleModel.name,
-                    node.modelMapping.smallModel.name,
-                ]
-            }
-            let protocolCatalog = ScienceModelProtocolAdapter(
-                upstreamModels: upstreamModels,
-                requestedDefault: node.defaultModel,
-                routeStyle: .desktop,
-                supports1MUpstreamModels: supports1M
+            return realCatalog(for: node, supports1M: supports1M)
+        }
+    }
+
+    static func realCatalog(
+        for node: ProxyConfiguration,
+        supports1M: Set<String> = []
+    ) -> [ClaudeDesktopCatalogEntry] {
+        let protocolCatalog = ScienceModelProtocolAdapter(
+            upstreamModels: upstreamModels(for: node),
+            requestedDefault: node.defaultModel,
+            routeStyle: .desktop,
+            supports1MUpstreamModels: supports1M
+        )
+        return protocolCatalog.models.map {
+            ClaudeDesktopCatalogEntry(
+                id: $0.id,
+                upstreamModel: $0.upstreamModel,
+                displayName: $0.displayName,
+                supports1M: $0.supports1M
             )
-            return protocolCatalog.models.map {
-                ClaudeDesktopCatalogEntry(
-                    id: $0.id,
-                    upstreamModel: $0.upstreamModel,
-                    displayName: $0.displayName,
-                    supports1M: $0.supports1M
-                )
-            }
         }
     }
 
@@ -237,29 +217,84 @@ final class ClaudeDesktopProfileStore {
         supports1M: Set<String> = [],
         routes: ClaudeAppResolvedModels? = nil
     ) -> ClaudeProductGatewayCatalogProjection {
-        let entries = catalog(
-            for: node,
-            mode: mode,
-            supports1M: supports1M,
-            routes: routes
-        )
+        let resolved = resolvedRoutes(for: node, routes: routes)
+        let routeEntries = productRouteEntries(resolved: resolved, supports1M: supports1M)
         switch mode {
         case .smartRoutes:
             return ClaudeProductGatewayCatalogProjection(
-                availableModels: entries.map(\.id),
-                // The backend uses this real identity when resolving the
-                // stable Default route; the public picker still defaults to
-                // the first catalog row.
-                defaultModel: routes?.defaultModel ?? node.defaultModel,
-                supports1MModels: entries.filter(\.supports1M).map(\.id)
+                availableModels: routeEntries.map(\.id),
+                defaultModel: resolved.defaultModel,
+                supports1MModels: routeEntries.filter(\.supports1M).map(\.id)
             )
         case .fullNodeCatalog:
+            let realModels = upstreamModels(for: node)
             return ClaudeProductGatewayCatalogProjection(
-                availableModels: entries.map(\.upstreamModel),
-                defaultModel: entries.first(where: {
-                    $0.upstreamModel == node.defaultModel
-                })?.upstreamModel ?? entries.first?.upstreamModel,
-                supports1MModels: entries.filter(\.supports1M).map(\.upstreamModel)
+                availableModels: realModels,
+                defaultModel: realModels.contains(resolved.defaultModel)
+                    ? resolved.defaultModel
+                    : realModels.first,
+                supports1MModels: realModels.filter(supports1M.contains)
+            )
+        }
+    }
+
+    private static func resolvedRoutes(
+        for node: ProxyConfiguration,
+        routes: ClaudeAppResolvedModels?
+    ) -> ClaudeAppResolvedModels {
+        routes ?? ClaudeAppResolvedModels(
+            defaultModel: node.defaultModel,
+            opus: node.modelMapping.bigModel.name,
+            sonnet: node.modelMapping.middleModel.name,
+            haiku: node.modelMapping.smallModel.name
+        )
+    }
+
+    private static func upstreamModels(for node: ProxyConfiguration) -> [String] {
+        let configured = node.modelCatalog.models
+        let candidates = configured.isEmpty
+            ? [
+                node.defaultModel,
+                node.modelMapping.bigModel.name,
+                node.modelMapping.middleModel.name,
+                node.modelMapping.smallModel.name,
+            ]
+            : configured
+        var seen = Set<String>()
+        return candidates.compactMap {
+            let model = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !model.isEmpty, seen.insert(model).inserted else { return nil }
+            return model
+        }
+    }
+
+    private static func productRouteEntries(
+        resolved: ClaudeAppResolvedModels,
+        supports1M: Set<String>
+    ) -> [ClaudeDesktopCatalogEntry] {
+        let ids = [
+            defaultRouteID,
+            opusRouteID,
+            sonnetRouteID,
+            haikuRouteID,
+        ]
+        let definitions = zip(
+            ids,
+            [
+                (resolved.defaultModel, "AIUsage"),
+                (resolved.opus, "AIUsage Opus"),
+                (resolved.sonnet, "AIUsage Sonnet"),
+                (resolved.haiku, "AIUsage Haiku"),
+            ]
+        )
+        return definitions.compactMap { id, definition in
+            let upstream = definition.0.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !upstream.isEmpty else { return nil }
+            return ClaudeDesktopCatalogEntry(
+                id: id,
+                upstreamModel: upstream,
+                displayName: definition.1,
+                supports1M: supports1M.contains(upstream)
             )
         }
     }
@@ -473,9 +508,8 @@ final class ClaudeDesktopProfileStore {
         object["inferenceGatewayBaseUrl"] = baseURL
         object["inferenceGatewayApiKey"] = clientKey
         object["disableDeploymentModeChooser"] = true
-        // Desktop sees stable Anthropic-shaped tier routes. The actual node
-        // models remain private Gateway targets, so a node switch never
-        // requires Desktop to reload this profile.
+        // The four AIUsage routes use compact Claude-shaped IDs. Full-catalog
+        // mode may append generated IDs for direct node-model selection.
         object.removeValue(forKey: "inferenceGatewayAuthScheme")
         object["inferenceModels"] = catalog.map { entry -> [String: Any] in
             var model: [String: Any] = [

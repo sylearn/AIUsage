@@ -45,6 +45,10 @@ final class GlobalProxyManager: ObservableObject {
         self.track = track
         self.adapter = adapter
         self.config = GlobalProxyStore.load(track: track)
+        if (track == .claude || track == .desktop), config.effectiveAllowLAN {
+            config.allowLAN = false
+            _ = GlobalProxyStore.save(config, track: track)
+        }
     }
 
     /// For the Claude page this remains the Claude Code consumer state; the
@@ -238,8 +242,8 @@ final class GlobalProxyManager: ObservableObject {
         }
     }
 
-    /// Desktop hot-switch routes use their own sparse projection. Full-catalog
-    /// mode remains an exact view of the node and intentionally ignores it.
+    /// Desktop overrides belong only to the four stable hot-switch routes.
+    /// Full-catalog mode is an exact read-only view of the selected node.
     @discardableResult
     func updateClaudeDesktopModelOverride(
         nodeID: String,
@@ -874,7 +878,12 @@ final class GlobalProxyManager: ObservableObject {
     }
 
     private var runtimeBindAddress: String {
-        track == .desktop ? "127.0.0.1" : config.bindAddress
+        switch track {
+        case .claude, .desktop, .science:
+            return "127.0.0.1"
+        case .codex, .opencode:
+            return config.bindAddress
+        }
     }
 
     @discardableResult

@@ -323,6 +323,7 @@ struct ProxyManagementView: View {
                 expectedClientKey: config.expectedClientKey,
                 defaultModel: config.defaultModel,
                 modelMapping: config.modelMapping,
+                modelCatalog: config.modelCatalog,
                 maxOutputTokens: config.maxOutputTokens
             )
             viewModel.addConfiguration(copy)

@@ -285,10 +285,19 @@ final class APIProviderDistributor {
             proxy.usePassthroughProxy = true
         }
 
-        // 模型库（共享）。Claude 的大/中/小槽位是本地映射（仅新节点播种、之后保留）；
+        // 模型目录（共享）。费用规则属于节点本地估算配置，不由提供商同步；
+        // Claude 的大/中/小槽位也是本地映射（仅新节点播种、之后保留）；
         // Codex 单模型即 bigModel（codexModel 取自 bigModel.name），属共享字段，始终跟随主配置。
         if wins(APIProviderSharedKey.models) {
-            proxy.modelLibrary = provider.models.isEmpty ? nil : provider.models
+            let providerCatalog = ProxyConfiguration.ModelCatalog(mappedModels: provider.models)
+            let providerNames = Set(providerCatalog.models)
+            let retainedLocalPricing = proxy.modelCatalog.pricingOverrides.filter {
+                providerNames.contains($0.key)
+            }
+            proxy.modelCatalog = .init(
+                models: providerCatalog.models,
+                pricingOverrides: retainedLocalPricing
+            )
         }
         if wins(APIProviderSharedKey.defaultModel) {
             let dm = provider.effectiveDefaultModel
@@ -308,8 +317,6 @@ final class APIProviderDistributor {
                 proxy.modelMapping.smallModel.name = dm
             }
         }
-        proxy.syncSlotPricingFromLibrary()
-
         // 新节点端口避让，避免与现有代理端口直接撞车。
         if existing == nil {
             proxy.port = freePort(preferred: proxy.port)
@@ -403,7 +410,8 @@ final class APIProviderDistributor {
                 priceInputPerMillion: m.pricing.inputPerMillionUSD,
                 priceOutputPerMillion: m.pricing.outputPerMillionUSD,
                 priceCacheReadPerMillion: m.pricing.cacheReadPerMillionUSD,
-                priceCacheWritePerMillion: m.pricing.cacheCreatePerMillionUSD
+                priceCacheWritePerMillion: m.pricing.cacheCreatePerMillionUSD,
+                pricingSource: m.pricing.source
             )
         }
     }
@@ -431,7 +439,9 @@ final class APIProviderDistributor {
         if trimmed(childBaseURL) != trimmed(master.baseURL) { overridden.insert(APIProviderSharedKey.baseURL) }
         if masterId != CLIProxyGatewayManager.managedProviderID,
            childKey != master.apiKey { overridden.insert(APIProviderSharedKey.apiKey) }
-        if (proxy.modelLibrary ?? []) != master.models { overridden.insert(APIProviderSharedKey.models) }
+        if proxy.modelCatalog.models != ProxyConfiguration.ModelCatalog(mappedModels: master.models).models {
+            overridden.insert(APIProviderSharedKey.models)
+        }
         if proxy.defaultModel != master.effectiveDefaultModel { overridden.insert(APIProviderSharedKey.defaultModel) }
         p.metadata.overriddenKeys = overridden.isEmpty ? nil : overridden
         return p

@@ -49,18 +49,70 @@ final class ModelFetchState: ObservableObject {
         }
 
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let dataArr = json["data"] as? [[String: Any]] else {
-                errorMessage = "Invalid response"
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                switch http.statusCode {
+                case 401, 403:
+                    errorMessage = L(
+                        "Authentication failed. Check the upstream API key.",
+                        "认证失败，请检查上游 API Key。"
+                    )
+                case 404:
+                    errorMessage = L(
+                        "This upstream does not expose a model list. You can still enter model names manually.",
+                        "该上游未提供模型列表，仍可手动输入模型名称。"
+                    )
+                default:
+                    errorMessage = L(
+                        "Could not read models (HTTP \(http.statusCode)).",
+                        "无法读取模型（HTTP \(http.statusCode)）。"
+                    )
+                }
                 return
             }
-            let models = dataArr.compactMap { $0["id"] as? String }.sorted()
+
+            let object = try JSONSerialization.jsonObject(with: data)
+            let models = Self.extractModelIDs(from: object)
             availableModels = models
-            errorMessage = models.isEmpty ? "No models found" : nil
+            errorMessage = models.isEmpty
+                ? L(
+                    "No model names were returned. You can still enter one manually.",
+                    "上游没有返回模型名称，仍可手动输入。"
+                )
+                : nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private static func extractModelIDs(from object: Any) -> [String] {
+        var names: [String] = []
+
+        func appendRows(_ rows: [[String: Any]]) {
+            names.append(contentsOf: rows.compactMap { row in
+                (row["id"] as? String) ?? (row["name"] as? String)
+            })
+        }
+
+        if let root = object as? [String: Any] {
+            if let rows = root["data"] as? [[String: Any]] {
+                appendRows(rows)
+            } else if let rows = root["models"] as? [[String: Any]] {
+                appendRows(rows)
+            } else if let values = root["models"] as? [String] {
+                names.append(contentsOf: values)
+            }
+        } else if let rows = object as? [[String: Any]] {
+            appendRows(rows)
+        } else if let values = object as? [String] {
+            names.append(contentsOf: values)
+        }
+
+        var seen = Set<String>()
+        return names
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     func filteredModels(for text: String) -> [String] {
@@ -114,44 +166,166 @@ struct ModelFetchControls: View {
 
 // MARK: - Text Field with Suggestions
 
-/// 单模型输入框 + 已获取模型的内联补全下拉。
+/// 单模型输入框 + 可搜索完整目录。目录可来自已保存模型，也可来自本次上游同步；
+/// 用户始终可以直接输入列表之外的真实模型名称。
 struct ModelSuggestionField: View {
     @Binding var text: String
     let placeholder: String
     @ObservedObject var state: ModelFetchState
+    var catalogModels: [String] = []
+
+    @State private var isPickerPresented = false
+    @State private var pickerQuery = ""
+    @State private var suppressNextTextPresentation = false
+    @FocusState private var isTextFieldFocused: Bool
+
+    private var allModels: [String] {
+        var seen = Set<String>()
+        return (state.availableModels + catalogModels)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private var filteredModels: [String] {
+        let query = pickerQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return allModels }
+        return allModels.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
 
     var body: some View {
-        let suggestions = state.filteredModels(for: text)
-        let showSuggestions = !state.availableModels.isEmpty && !text.isEmpty && !suggestions.isEmpty
-            && !suggestions.contains(where: { $0 == text })
-
-        VStack(alignment: .leading, spacing: 0) {
+        HStack(spacing: 0) {
             TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .font(.system(.body, design: .monospaced))
+                .focused($isTextFieldFocused)
+                .padding(.leading, 9)
+                .padding(.vertical, 6)
+                .onChange(of: text) { _, newValue in
+                    if suppressNextTextPresentation {
+                        suppressNextTextPresentation = false
+                        return
+                    }
+                    guard isTextFieldFocused, !allModels.isEmpty else { return }
+                    pickerQuery = newValue
+                    isPickerPresented = true
+                }
 
-            if showSuggestions {
+            Divider()
+                .frame(height: 18)
+
+            Button {
+                pickerQuery = ""
+                isPickerPresented.toggle()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help(L("Search available models", "搜索可用模型"))
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.14), lineWidth: 1))
+        .popover(isPresented: $isPickerPresented, arrowEdge: .bottom) {
+            modelPicker
+        }
+    }
+
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextField(L("Search models", "搜索模型"), text: $pickerQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .autocorrectionDisabled()
+                if !pickerQuery.isEmpty {
+                    Button { pickerQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .background(Capsule().fill(Color.primary.opacity(0.06)))
+
+            if allModels.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L("No synced models yet", "尚未同步模型"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(L(
+                        "Use “Sync” above, or type an exact model name directly.",
+                        "请先点击上方“同步”，也可以直接输入真实模型名称。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else if filteredModels.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L("No matching models", "没有匹配的模型"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(L(
+                        "Press Return in the field to keep the name you entered.",
+                        "可以保留输入框中手动填写的模型名称。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(suggestions.prefix(8), id: \.self) { model in
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(filteredModels, id: \.self) { model in
                             Button {
+                                suppressNextTextPresentation = true
                                 text = model
+                                isPickerPresented = false
                             } label: {
-                                Text(model)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                HStack(spacing: 8) {
+                                    Image(systemName: model == text ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(model == text ? Color.teal : Color.secondary.opacity(0.45))
+                                    Text(model)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 8)
+                                .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .background(Color.primary.opacity(0.04))
+                            .background(
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(model == text ? Color.teal.opacity(0.08) : Color.clear)
+                            )
                         }
                     }
                 }
-                .frame(maxHeight: 160)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1)))
+                .frame(maxHeight: 240)
+            }
+
+            HStack {
+                Text(L(
+                    "\(allModels.count) available · manual input is allowed",
+                    "共 \(allModels.count) 个 · 支持手动输入"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                Spacer()
             }
         }
+        .padding(12)
+        .frame(width: 390)
     }
 }
 
@@ -159,7 +333,8 @@ struct ModelSuggestionField: View {
 
 /// 已获取模型的可搜索列表：顶部搜索框 + 计数 + 全部添加；整行点击即添加，
 /// 左侧状态图标（加号→对勾），hover 高亮，右侧留白避开滚动条，字号更大、行高更舒展。
-/// 四端共用（OpenCode 直接用；Claude/Codex/API 提供商经 ProxyModelLibraryEditor 间接用）。
+/// 仅用于需要把上游结果加入持久列表的编辑器（API 提供商 / OpenCode）。
+/// Claude 与 Codex 节点同步后直接合并到模型目录，不再展示重复的“已添加”列表。
 struct FetchedModelAppendList: View {
     @ObservedObject var state: ModelFetchState
     /// 当前已在列表中的模型（用于标记「已添加」并禁止重复添加）。

@@ -8,7 +8,6 @@ import SwiftUI
 struct ClaudeGlobalProxySection: View {
     @ObservedObject private var manager = GlobalProxyManager.claude
     @ObservedObject private var runtime = GlobalProxyRuntime.claude
-    @ObservedObject private var proxyVM = ProxyViewModel.shared
 
     @State private var localSelectedNodeId = ""
     private let externalSelectedNodeId: Binding<String>?
@@ -36,25 +35,39 @@ struct ClaudeGlobalProxySection: View {
     private var modelMode: ClaudeDesktopCatalogMode { manager.config.effectiveClaudeCodeCatalogMode }
 
     var body: some View {
-        GlobalProxySectionScaffold(
+        ClaudeProductGatewayCard(
             brand: Self.claudeBrand,
+            systemImage: "terminal",
             title: L("Code Gateway", "Code 网关"),
-            subtitle: gatewaySubtitle,
+            subtitle: "Claude Code",
+            statusText: gatewayStatusText,
+            statusColor: gatewayStatusColor,
             isEnabled: isEnabled,
-            isRunning: runtime.isRunning,
-            isRuntimeOwnedByAnotherConsumer: false,
-            otherConsumerStatus: "",
             isBusy: manager.isBusy,
-            port: manager.config.port,
-            bindHost: manager.config.displayBindHost,
-            allowLAN: allowLANBinding,
             hasNodes: !nodes.isEmpty,
-            emptyHint: L("Create a Claude node first to use the global proxy.", "请先创建 Claude 节点后再使用全局代理。"),
-            errorText: manager.operationError,
+            emptyHint: L("Create a Claude node first.", "请先创建 Claude 节点。"),
+            endpoint: "127.0.0.1:\(manager.config.port)",
+            mode: modelMode,
+            effectText: modelMode == .smartRoutes
+                ? L("Live", "即时生效")
+                : L("New session", "新会话生效"),
+            effectSymbol: modelMode == .smartRoutes ? "bolt.fill" : "arrow.clockwise",
+            effectColor: modelMode == .smartRoutes ? .green : .orange,
+            isToggleDisabled: (!nodes.isEmpty ? false : !isEnabled),
             toggle: enableBinding,
+            onModeSelect: { mode in
+                Task { await manager.updateClaudeCodeCatalogMode(mode) }
+            },
             nodeControl: { nodeControl },
             config: { configContent },
-            runningSummary: { runningSummary }
+            extraAction: { EmptyView() },
+            message: {
+                if let error = manager.operationError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
         )
         .onAppear(perform: syncFromConfig)
         .confirmationDialog(
@@ -85,18 +98,15 @@ struct ClaudeGlobalProxySection: View {
     // MARK: - Active Node (header; hot-switch when enabled)
 
     private var nodeControl: some View {
-        HStack(spacing: 6) {
-            GlobalProxyInlineLabel(text: L("Active Node", "激活节点"))
-            GlobalProxyChipMenu(
-                brand: Self.claudeBrand,
-                title: currentNodeName,
-                systemImage: "bolt.fill",
-                isDisabled: manager.isBusy,
-                items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
-                selectedId: nodeBinding.wrappedValue,
-                onSelect: { nodeBinding.wrappedValue = $0 }
-            )
-        }
+        GlobalProxyChipMenu(
+            brand: Self.claudeBrand,
+            title: currentNodeName,
+            systemImage: "bolt.fill",
+            isDisabled: manager.isBusy,
+            items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
+            selectedId: nodeBinding.wrappedValue,
+            onSelect: { nodeBinding.wrappedValue = $0 }
+        )
         .help(L("Choose the Code Gateway route", "选择 Code 网关路由"))
     }
 
@@ -105,55 +115,34 @@ struct ClaudeGlobalProxySection: View {
         return nodes.first(where: { $0.id == id })?.name ?? L("Select", "选择")
     }
 
-    // MARK: - Running Summary (read-only chips when enabled)
-
-    @ViewBuilder private var runningSummary: some View {
-        GlobalProxySummaryChip(
-            label: L("Mode", "模式"),
-            value: modelMode == .smartRoutes ? L("Hot switch", "热切换") : L("Node models", "节点模型")
-        )
-        if let active = proxyVM.configurations.first(where: { $0.id == manager.activeNodeId }) {
-            let models = manager.config.effectiveClaudeCodeModels(for: active)
-            GlobalProxySummaryChip(label: L("Default", "默认"), value: models.defaultModel)
-            GlobalProxySummaryChip(label: "Opus", value: models.opus)
-            GlobalProxySummaryChip(label: "Sonnet", value: models.sonnet)
-            GlobalProxySummaryChip(label: "Haiku", value: models.haiku)
-            if modelMode == .fullNodeCatalog {
-                GlobalProxySummaryChip(label: L("Catalog", "目录"), value: "\(active.runtimeModelCatalog.count)")
-            }
-        }
-    }
-
     // MARK: - Configuration
 
     private var configContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                GlobalProxyField(label: L("Port", "端口")) {
-                    TextField(
-                        "14400",
-                        value: portBinding,
-                        format: IntegerFormatStyle<Int>.number.grouping(.never)
-                    )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                }
-                Text(L(
-                    "Model routes are configured in the Code models card below.",
-                    "模型映射请在下方“Code 模型”卡片中配置。"
-                ))
-                .font(.caption)
+            Label(L("Local gateway", "本机网关"), systemImage: "network")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-        }
-    }
 
-    private var allowLANBinding: Binding<Bool> {
-        Binding(
-            get: { manager.config.effectiveAllowLAN },
-            set: { manager.updateAllowLAN($0) }
-        )
+            GlobalProxyField(label: L("Local port", "本机端口")) {
+                TextField(
+                    "14400",
+                    value: portBinding,
+                    format: IntegerFormatStyle<Int>.number.grouping(.never)
+                )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+            }
+
+            Text(L(
+                "Used only by Claude Code on this Mac. Change it only when the port conflicts.",
+                "仅供本机 Claude Code 使用；只有端口冲突时才需要修改。"
+            ))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(11)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Self.claudeBrand.opacity(0.045)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Self.claudeBrand.opacity(0.10)))
     }
 
     private var portBinding: Binding<Int> {
@@ -217,10 +206,18 @@ struct ClaudeGlobalProxySection: View {
         return manager.activeNodeId ?? nodes.first?.id ?? ""
     }
 
-    private var gatewaySubtitle: String {
-        modelMode == .smartRoutes
-            ? L("Code · stable aliases · hot switch", "Code · 固定别名 · 热切换")
-            : L("Code · real model names · restart on node change", "Code · 真实模型名 · 切换节点需重启")
+    private var gatewayStatusText: String {
+        if manager.isBusy { return L("Working", "处理中") }
+        if isEnabled, runtime.isRunning { return L("Connected", "已接入") }
+        if isEnabled { return L("Starting", "启动中") }
+        return L("Off", "未接入")
+    }
+
+    private var gatewayStatusColor: Color {
+        if manager.isBusy { return .orange }
+        if isEnabled, runtime.isRunning { return .green }
+        if isEnabled { return .orange }
+        return .secondary
     }
 
     private func syncFromConfig() {

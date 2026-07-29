@@ -86,6 +86,9 @@ class ClaudeSettingsManager {
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
         "NODE_EXTRA_CA_CERTS",
     ]
@@ -128,6 +131,9 @@ class ClaudeSettingsManager {
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL", config.haikuModel),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Haiku" : nil),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("ANTHROPIC_CUSTOM_MODEL_OPTION", presentsAIUsageRoutes ? config.defaultModel : nil),
+            ("ANTHROPIC_CUSTOM_MODEL_OPTION_NAME", presentsAIUsageRoutes ? "AIUsage" : nil),
+            ("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
             ("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", config.enableGatewayModelDiscovery ? "1" : nil),
             ("NODE_EXTRA_CA_CERTS", config.nodeExtraCACerts),
         ]

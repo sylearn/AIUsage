@@ -289,6 +289,196 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
     }
 }
 
+// MARK: - Claude Product Gateway
+
+/// Shared compact shell for Claude Code and Claude Desktop. The products keep
+/// their own attach/reload behavior, while placement, mode selection and
+/// connection feedback use one visual language.
+struct ClaudeProductGatewayCard<
+    NodeControl: View,
+    Config: View,
+    ExtraAction: View,
+    Message: View
+>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let brand: Color
+    let systemImage: String
+    let title: String
+    let subtitle: String
+    let statusText: String
+    let statusColor: Color
+    let isEnabled: Bool
+    let isBusy: Bool
+    let hasNodes: Bool
+    let emptyHint: String
+    let endpoint: String
+    let mode: ClaudeDesktopCatalogMode
+    let effectText: String
+    let effectSymbol: String
+    let effectColor: Color
+    let isToggleDisabled: Bool
+    let toggle: Binding<Bool>
+    let onModeSelect: (ClaudeDesktopCatalogMode) -> Void
+    @ViewBuilder let nodeControl: () -> NodeControl
+    @ViewBuilder let config: () -> Config
+    @ViewBuilder let extraAction: () -> ExtraAction
+    @ViewBuilder let message: () -> Message
+
+    @State private var isConfigurationExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            effectLine
+
+            if !hasNodes {
+                HStack(spacing: 7) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                    Text(emptyHint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 10)
+            }
+
+            if isConfigurationExpanded, !isEnabled {
+                Divider()
+                    .opacity(0.55)
+                    .padding(.top, 12)
+                config()
+                    .padding(.top, 12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            message()
+                .padding(.top, 10)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(isEnabled ? brand.opacity(0.42) : Color.primary.opacity(0.065), lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(isEnabled ? brand : Color.clear)
+                .frame(width: 3, height: 42)
+                .padding(.leading, 1)
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isEnabled)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: isConfigurationExpanded)
+        .onChange(of: isEnabled) { _, enabled in
+            if enabled { isConfigurationExpanded = false }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(brand)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(brand.opacity(0.13))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 7) {
+                    Text(title)
+                        .font(.headline.weight(.bold))
+                    statusBadge
+                }
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 170, maxWidth: 220, alignment: .leading)
+
+            Spacer(minLength: 12)
+
+            if hasNodes {
+                nodeControl()
+                    .frame(maxWidth: 230)
+            }
+            ClaudeModelModeSelector(
+                selection: mode,
+                brand: brand,
+                isDisabled: isBusy,
+                onSelect: onModeSelect
+            )
+            if isBusy {
+                ProgressView().controlSize(.small)
+            }
+            extraAction()
+            configurationButton
+            Toggle("", isOn: toggle)
+                .labelsHidden()
+                .toggleStyle(ProxyActivationToggleStyle(brandColor: brand, isBusy: isBusy))
+                .disabled(isToggleDisabled || isBusy)
+                .help(isEnabled ? L("Disconnect", "断开接入") : L("Connect", "启用接入"))
+                .accessibilityLabel(isEnabled ? L("Disconnect gateway", "断开网关") : L("Connect gateway", "启用网关"))
+        }
+    }
+
+    private var effectLine: some View {
+        HStack(spacing: 6) {
+            Image(systemName: effectSymbol)
+                .font(.system(size: 9, weight: .bold))
+            Text(effectText)
+                .font(.system(size: 10.5, weight: .semibold))
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Text(L("Local gateway", "仅本机网关"))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(effectColor)
+        .padding(.leading, 42)
+        .padding(.top, 7)
+    }
+
+    private var statusBadge: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            Text(statusText)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(statusColor)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(statusColor.opacity(0.11)))
+    }
+
+    private var configurationButton: some View {
+        Button {
+            isConfigurationExpanded.toggle()
+        } label: {
+            Image(systemName: isEnabled ? "lock.fill" : "slider.horizontal.3")
+                .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(isEnabled ? Color.secondary : brand)
+            .frame(width: 29, height: 29)
+            .background(Circle().fill(Color.primary.opacity(0.045)))
+            .overlay(Circle().stroke(Color.primary.opacity(0.07), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(isEnabled || isBusy)
+        .help(isEnabled
+              ? L("Disconnect before editing connection settings", "请先断开接入，再修改连接设置")
+              : L("Edit local gateway settings · \(endpoint)", "编辑本机网关设置 · \(endpoint)"))
+    }
+}
+
 // MARK: - Chip Picker (custom popover; unified with menu bar panel)
 // 胶囊触发器 + 自定义 popover 面板：取代旧的系统 `.menu` 下拉。面板行样式与顶部菜单栏
 // 节点切换面板（MenuBarPanelRowView）完全一致：激活行品牌色高亮 + 勾选 + 左侧色条 + hover。
@@ -615,34 +805,35 @@ struct GlobalProxyTip: View {
 /// Shared Code/Desktop mode control. The layout is deliberately content-sized:
 /// the two choices read as one product decision instead of two full-width cards.
 struct ClaudeModelModeSelector: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let selection: ClaudeDesktopCatalogMode
     let brand: Color
-    let nodeModelsDetail: String
     let isDisabled: Bool
     let onSelect: (ClaudeDesktopCatalogMode) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 2) {
             option(
                 .smartRoutes,
                 title: L("Hot switch", "热切换"),
-                detail: L("4 stable model routes", "固定 4 个模型入口"),
                 symbol: "arrow.triangle.2.circlepath"
             )
             option(
                 .fullNodeCatalog,
                 title: L("Node models", "节点模型"),
-                detail: nodeModelsDetail,
                 symbol: "square.stack.3d.up"
             )
         }
+        .padding(3)
+        .background(Capsule().fill(Color.primary.opacity(0.055)))
+        .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 1))
         .fixedSize(horizontal: true, vertical: false)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: selection)
     }
 
     private func option(
         _ mode: ClaudeDesktopCatalogMode,
         title: String,
-        detail: String,
         symbol: String
     ) -> some View {
         let selected = selection == mode
@@ -650,45 +841,32 @@ struct ClaudeModelModeSelector: View {
             guard !selected else { return }
             onSelect(mode)
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? brand : Color.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selected ? brand.opacity(0.13) : Color.primary.opacity(0.04))
-                    )
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(detail)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? brand : Color.secondary.opacity(0.45))
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
             }
+            .foregroundStyle(selected ? brand : Color.secondary)
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(width: 246, alignment: .leading)
-            .contentShape(Rectangle())
+            .frame(height: 27)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(selected ? brand.opacity(0.065) : Color.primary.opacity(0.025))
+                Capsule()
+                    .fill(selected ? brand.opacity(0.15) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(selected ? brand.opacity(0.34) : Color.primary.opacity(0.07), lineWidth: 1)
+                Capsule()
+                    .stroke(selected ? brand.opacity(0.34) : Color.clear, lineWidth: 1)
             )
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(isDisabled || selected)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(mode == .smartRoutes
+            ? L("Keep four stable model names and switch routes live", "保留四个固定模型名称并实时切换路由")
+            : L("Expose real node model names", "使用节点真实模型名称"))
     }
 }
 
@@ -785,6 +963,92 @@ struct ClaudeModelCatalogGrid: View {
     }
 }
 
+/// Searchable catalog surface used when a product exposes the selected node's
+/// full model list instead of four semantic application routes.
+struct ClaudeSearchableModelDirectory: View {
+    let items: [ClaudeModelCatalogItem]
+    let brand: Color
+    let title: String
+
+    @State private var searchText = ""
+    @State private var showAll = false
+
+    private var filteredItems: [ClaudeModelCatalogItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return items }
+        return items.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || ($0.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
+                || ($0.badge?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 8) {
+                Label(title, systemImage: "square.stack.3d.up.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("\(items.count)")
+                    .font(.system(size: 9.5, weight: .bold).monospacedDigit())
+                    .foregroundStyle(brand)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(brand.opacity(0.10)))
+                Spacer(minLength: 10)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    TextField(L("Search models", "搜索模型"), text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .frame(width: 220, height: 29)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.045)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.065)))
+            }
+
+            if filteredItems.isEmpty {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                    Text(L("No matching models", "没有匹配的模型"))
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 64)
+            } else {
+                ClaudeModelCatalogGrid(
+                    items: filteredItems,
+                    brand: brand,
+                    showAll: $showAll
+                )
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.primary.opacity(0.022))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(brand.opacity(0.12))
+        )
+        .onChange(of: searchText) { _, _ in showAll = false }
+    }
+}
+
 // MARK: - Shared Claude Product Model Routes
 
 /// Compact four-route editor used by product gateways. The color belongs to
@@ -805,17 +1069,14 @@ struct ClaudeModelRouteBoard: View {
     private var hasOverrides: Bool { overrides?.isEmpty == false }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 8) {
                 Label(L("Application model routes", "应用模型映射"), systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(L("4 routes", "4 个入口"))
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(brand)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(brand.opacity(0.10)))
+                Text(L("\(catalog.count) models", "\(catalog.count) 个可选"))
+                    .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.tertiary)
                 Spacer(minLength: 8)
                 if hasOverrides {
                     Button(action: onReset) {
@@ -828,8 +1089,25 @@ struct ClaudeModelRouteBoard: View {
                 }
             }
 
+            if showsStableRouteNames {
+                HStack(spacing: 6) {
+                    Text(L("Shown in Claude", "Claude 中显示"))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(brand)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(brand.opacity(0.11)))
+                    Text("AIUsage  ·  AIUsage Opus  ·  AIUsage Sonnet  ·  AIUsage Haiku")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+                .accessibilityElement(children: .combine)
+            }
+
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 245, maximum: 360), spacing: 9)],
+                columns: [GridItem(.adaptive(minimum: 275, maximum: 460), spacing: 9)],
                 alignment: .leading,
                 spacing: 9
             ) {
@@ -839,8 +1117,8 @@ struct ClaudeModelRouteBoard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(brand.opacity(0.035)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(brand.opacity(0.13)))
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.primary.opacity(0.022)))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(brand.opacity(0.12)))
     }
 
     private func routeMenu(_ route: ClaudeAppModelRoute) -> some View {
@@ -849,75 +1127,48 @@ struct ClaudeModelRouteBoard: View {
         let overridden = overrides?.model(for: route) != nil
         let color = routeColor(route)
 
-        return HStack(spacing: 10) {
+        return HStack(spacing: 9) {
             Image(systemName: routeSymbol(route))
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(color)
-                .frame(width: 28, height: 28)
+                .frame(width: 27, height: 27)
                 .background(Circle().fill(color.opacity(0.13)))
 
-            VStack(alignment: .leading, spacing: 3) {
-                Menu {
-                    Button {
-                        onSelect(route, nodeDefault)
-                    } label: {
-                        Label(
-                            L("Node default · \(nodeDefault)", "节点默认 · \(nodeDefault)"),
-                            systemImage: effective == nodeDefault ? "checkmark" : "arrow.counterclockwise"
-                        )
-                    }
-                    Divider()
-                    ForEach(catalog, id: \.self) { model in
-                        Button {
-                            onSelect(route, model)
-                        } label: {
-                            if model == effective {
-                                Label(model, systemImage: "checkmark")
-                            } else {
-                                Text(model)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(showsStableRouteNames ? "AIUsage \(route.title)" : route.title)
-                            .font(.caption.weight(.bold))
-                        Text(overridden ? L("Override", "应用覆盖") : L("Node", "跟随节点"))
-                            .font(.system(size: 8.5, weight: .bold))
-                            .foregroundStyle(overridden ? color : Color.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(overridden ? color.opacity(0.14) : Color.primary.opacity(0.055))
-                            )
-                        Spacer(minLength: 4)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .disabled(isDisabled)
-
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(color.opacity(0.82))
-                    Text(effective)
-                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(route.title)
+                    .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                Text(overridden ? L("App override", "应用覆盖") : L("Node default", "节点默认"))
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundStyle(overridden ? color : Color.secondary)
             }
+            .frame(width: 72, alignment: .leading)
+
+            Image(systemName: "arrow.right")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(color.opacity(0.75))
+
+            ClaudeRouteModelPicker(
+                route: route,
+                brand: color,
+                catalog: catalog,
+                selectedModel: effective,
+                nodeDefault: nodeDefault,
+                isDisabled: isDisabled,
+                onSelect: { onSelect(route, $0) }
+            )
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 12)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .contentShape(Capsule())
-        .background(Capsule().fill(color.opacity(overridden ? 0.13 : 0.055)))
-        .overlay(Capsule().stroke(color.opacity(overridden ? 0.42 : 0.17), lineWidth: 1))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(color.opacity(overridden ? 0.085 : 0.035)))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(color.opacity(overridden ? 0.9 : 0.45))
+                .frame(width: 3, height: 28)
+                .padding(.leading, 1)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(color.opacity(overridden ? 0.28 : 0.10), lineWidth: 1))
         .opacity(isDisabled ? 0.55 : 1)
         .help(L(
             "Changes only \(productName)'s route for this node. The Node default is untouched.",
@@ -941,6 +1192,219 @@ struct ClaudeModelRouteBoard: View {
         case .sonnet: return "waveform.path"
         case .haiku: return "bolt.fill"
         }
+    }
+}
+
+private struct ClaudeRouteModelPicker: View {
+    let route: ClaudeAppModelRoute
+    let brand: Color
+    let catalog: [String]
+    let selectedModel: String
+    let nodeDefault: String
+    let isDisabled: Bool
+    let onSelect: (String) -> Void
+
+    @State private var isOpen = false
+    @State private var searchText = ""
+
+    private var filteredModels: [String] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return catalog }
+        return catalog.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var visibleModels: [String] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty else { return filteredModels }
+        return filteredModels.filter { $0 != nodeDefault }
+    }
+
+    var body: some View {
+        Button {
+            searchText = ""
+            isOpen.toggle()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(brand)
+                Text(selectedModel)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 2)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(brand.opacity(isOpen ? 0.48 : 0.16), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            pickerPanel
+        }
+        .accessibilityLabel(L("Model for \(route.title)", "\(route.title) 对应模型"))
+        .accessibilityValue(selectedModel)
+    }
+
+    private var pickerPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 9) {
+                Image(systemName: routeSymbol)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(brand)
+                    .frame(width: 27, height: 27)
+                    .background(Circle().fill(brand.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L("Choose \(route.title) model", "选择 \(route.title) 模型"))
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Text(L("\(catalog.count) models from this node", "当前节点共 \(catalog.count) 个模型"))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(12)
+
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextField(L("Search model names", "搜索模型名称"), text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11.5))
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.045)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.065), lineWidth: 1))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 9)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ClaudeRouteModelPickerRow(
+                            brand: brand,
+                            model: nodeDefault,
+                            badge: L("Node default", "节点默认"),
+                            isSelected: selectedModel == nodeDefault
+                        ) {
+                            choose(nodeDefault)
+                        }
+                        Divider().padding(.vertical, 4)
+                    }
+
+                    ForEach(visibleModels, id: \.self) { model in
+                        ClaudeRouteModelPickerRow(
+                            brand: brand,
+                            model: model,
+                            badge: model == nodeDefault ? L("Default", "默认") : nil,
+                            isSelected: model == selectedModel
+                        ) {
+                            choose(model)
+                        }
+                    }
+                }
+                .padding(6)
+            }
+            .frame(maxHeight: 330)
+
+            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               filteredModels.isEmpty {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                    Text(L("No matching models", "没有匹配的模型"))
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 18)
+            }
+        }
+        .frame(width: 350)
+    }
+
+    private var routeSymbol: String {
+        switch route {
+        case .defaultModel: return "sparkles"
+        case .opus: return "diamond.fill"
+        case .sonnet: return "waveform.path"
+        case .haiku: return "bolt.fill"
+        }
+    }
+
+    private func choose(_ model: String) {
+        onSelect(model)
+        isOpen = false
+    }
+}
+
+private struct ClaudeRouteModelPickerRow: View {
+    let brand: Color
+    let model: String
+    let badge: String?
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(isSelected ? brand : Color.secondary.opacity(0.38))
+                Text(model)
+                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 6)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(isSelected ? brand : Color.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.primary.opacity(0.055)))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? brand.opacity(0.13) : (isHovered ? Color.primary.opacity(0.055) : Color.clear))
+            )
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(brand)
+                        .frame(width: 3, height: 17)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 

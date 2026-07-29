@@ -133,6 +133,9 @@ struct OpenCodeNodeEditorView: View {
         }
         // 单页表单，与 Codex 编辑器同尺寸。
         .frame(width: 750, height: 800)
+        .onChange(of: node.pricingCurrency) { oldCurrency, newCurrency in
+            convertPrices(from: oldCurrency, to: newCurrency)
+        }
     }
 
     // MARK: - Sections
@@ -316,26 +319,44 @@ struct OpenCodeNodeEditorView: View {
             HStack {
                 fieldLabel(L("Models & Pricing", "模型与定价"), required: true)
                 Spacer()
-                if showsPriceColumns {
-                    Button {
-                        autoFillCachePrices()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "wand.and.stars")
-                            Text(L("Auto-fill Cache (1.25× / 0.1×)", "自动填充缓存（1.25×/0.1×）"))
-                        }
-                        .font(.caption.weight(.medium))
-                    }
-                    .buttonStyle(.borderless)
-                    .help(L(
-                        "Set cache-write = 1.25× input and cache-read = 0.1× input for every model with an input price.",
-                        "为所有已填输入价的模型按 ×1.25 / ×0.1 计算缓存写入与读取单价。"
-                    ))
-                }
                 CapsuleSegmentedPicker(
                     options: OpenCodePricingCurrency.allCases.map { CapsuleSegmentOption($0, title: $0.label) },
                     selection: $node.pricingCurrency
                 )
+            }
+
+            HStack(spacing: 10) {
+                PublicModelPricingImportControl(
+                    models: modelRows.map(\.entry.id),
+                    upstreamBaseURL: node.baseURL,
+                    displayCurrency: publicPriceDisplayCurrency,
+                    applyNote: node.pricingCurrency == .none
+                        ? L(
+                            "Applying matches will enable USD pricing for this node.",
+                            "应用匹配后会为此节点启用 USD 计价。"
+                        )
+                        : nil,
+                    onApply: applyPublicPrices
+                )
+
+                if showsPriceColumns {
+                    Button {
+                        autoFillCachePrices()
+                    } label: {
+                        Label(
+                            L("Fill Blank Cache Prices", "填充空白缓存价格"),
+                            systemImage: "wand.and.stars"
+                        )
+                        .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .help(L(
+                        "For blank cache prices only, use 1.25× input for cache writes and 0.1× input for cache reads.",
+                        "只填充空白缓存价格：缓存写入按输入价的 1.25 倍，缓存读取按 0.1 倍。"
+                    ))
+                }
+
+                Spacer()
             }
 
             ModelFetchControls(
@@ -397,8 +418,9 @@ struct OpenCodeNodeEditorView: View {
                     Text(L("Cache R", "缓存读"))
                 }
                 .frame(width: 64, alignment: .leading)
+                Text(L("Source", "来源")).frame(width: 56, alignment: .leading)
             }
-            Spacer().frame(width: 20)
+            Spacer().frame(width: 40)
         }
         .font(.system(size: 10, weight: .medium))
         .foregroundStyle(.tertiary)
@@ -431,10 +453,14 @@ struct OpenCodeNodeEditorView: View {
                     .autocorrectionDisabled()
 
                 if showsPriceColumns {
-                    priceField(row.entry.priceInputPerMillion)
-                    priceField(row.entry.priceOutputPerMillion)
-                    priceField(row.entry.priceCacheWritePerMillion)
-                    priceField(row.entry.priceCacheReadPerMillion)
+                    priceField(row.entry.priceInputPerMillion, source: row.entry.pricingSource)
+                    priceField(row.entry.priceOutputPerMillion, source: row.entry.pricingSource)
+                    priceField(row.entry.priceCacheWritePerMillion, source: row.entry.pricingSource)
+                    priceField(row.entry.priceCacheReadPerMillion, source: row.entry.pricingSource)
+                    PricingSourceIndicator(
+                        pricing: pricingValue(for: row.wrappedValue.entry),
+                        width: 56
+                    )
                 }
 
                 Button {
@@ -541,8 +567,21 @@ struct OpenCodeNodeEditorView: View {
         .buttonStyle(.plain)
     }
 
-    private func priceField(_ value: Binding<Double>) -> some View {
-        TextField("0", value: value, format: .number.precision(.fractionLength(0...4)))
+    private func priceField(
+        _ value: Binding<Double>,
+        source: Binding<ProxyConfiguration.ModelPricing.Source?>
+    ) -> some View {
+        TextField(
+            "0",
+            value: Binding(
+                get: { value.wrappedValue },
+                set: {
+                    value.wrappedValue = max(0, $0)
+                    source.wrappedValue = .manual
+                }
+            ),
+            format: .number.precision(.fractionLength(0...6))
+        )
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11, design: .monospaced))
             .frame(width: 64)
@@ -551,8 +590,74 @@ struct OpenCodeNodeEditorView: View {
     private func autoFillCachePrices() {
         for index in modelRows.indices where modelRows[index].entry.priceInputPerMillion > 0 {
             let input = modelRows[index].entry.priceInputPerMillion
-            modelRows[index].entry.priceCacheWritePerMillion = input * OpenCodeNode.cacheWriteMultiplier
-            modelRows[index].entry.priceCacheReadPerMillion = input * OpenCodeNode.cacheReadMultiplier
+            var changed = false
+            if modelRows[index].entry.priceCacheWritePerMillion == 0 {
+                modelRows[index].entry.priceCacheWritePerMillion = input * OpenCodeNode.cacheWriteMultiplier
+                changed = true
+            }
+            if modelRows[index].entry.priceCacheReadPerMillion == 0 {
+                modelRows[index].entry.priceCacheReadPerMillion = input * OpenCodeNode.cacheReadMultiplier
+                changed = true
+            }
+            if changed {
+                modelRows[index].entry.pricingSource = .manual
+            }
+        }
+    }
+
+    private var publicPriceDisplayCurrency: ProxyConfiguration.PricingCurrency {
+        node.pricingCurrency == .cny ? .cny : .usd
+    }
+
+    private func pricingValue(
+        for entry: OpenCodeModelEntry
+    ) -> ProxyConfiguration.ModelPricing {
+        .init(
+            inputPerMillion: entry.priceInputPerMillion,
+            outputPerMillion: entry.priceOutputPerMillion,
+            cacheCreatePerMillion: entry.priceCacheWritePerMillion,
+            cacheReadPerMillion: entry.priceCacheReadPerMillion,
+            currency: publicPriceDisplayCurrency,
+            source: entry.pricingSource
+        )
+    }
+
+    private func applyPublicPrices(_ matches: [PublicModelPriceMatch]) {
+        if node.pricingCurrency == .none {
+            node.pricingCurrency = .usd
+        }
+        let matchesByModel = Dictionary(uniqueKeysWithValues: matches.map { ($0.model, $0.pricing) })
+        for index in modelRows.indices {
+            let model = modelRows[index].entry.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard
+                !modelRows[index].entry.hasPricing,
+                let imported = matchesByModel[model]
+            else { continue }
+            modelRows[index].entry.priceInputPerMillion = imported.inputPerMillion
+            modelRows[index].entry.priceOutputPerMillion = imported.outputPerMillion
+            modelRows[index].entry.priceCacheWritePerMillion = imported.cacheCreatePerMillion
+            modelRows[index].entry.priceCacheReadPerMillion = imported.cacheReadPerMillion
+            modelRows[index].entry.pricingSource = imported.source
+        }
+    }
+
+    private func convertPrices(
+        from oldCurrency: OpenCodePricingCurrency,
+        to newCurrency: OpenCodePricingCurrency
+    ) {
+        guard
+            oldCurrency != newCurrency,
+            oldCurrency != .none,
+            newCurrency != .none
+        else { return }
+        let factor = newCurrency == .cny
+            ? AppSettings.cnyPerUSD
+            : (1 / AppSettings.cnyPerUSD)
+        for index in modelRows.indices {
+            modelRows[index].entry.priceInputPerMillion *= factor
+            modelRows[index].entry.priceOutputPerMillion *= factor
+            modelRows[index].entry.priceCacheWritePerMillion *= factor
+            modelRows[index].entry.priceCacheReadPerMillion *= factor
         }
     }
 

@@ -37,13 +37,18 @@ public struct ScienceModelProtocolAdapter: Sendable {
 
     /// Some Science releases accept only Claude-shaped model IDs.
     static let generatedIDPrefix = "claude-aiusage-v1-"
-    public static let desktopDefaultRouteID = "claude-default-4-6-aiusage-v1"
-    public static let desktopOpusRouteID = "claude-opus-4-6-aiusage-v1"
-    public static let desktopSonnetRouteID = "claude-sonnet-4-6-aiusage-v1"
-    public static let desktopHaikuRouteID = "claude-haiku-4-5-aiusage-v1"
+    public static let defaultRouteID = "claude-aiusage"
+    public static let opusRouteID = "claude-aiusage-opus"
+    public static let sonnetRouteID = "claude-aiusage-sonnet"
+    public static let haikuRouteID = "claude-aiusage-haiku"
 
-    public static func isStableDesktopTierRoute(_ model: String) -> Bool {
-        [desktopDefaultRouteID, desktopOpusRouteID, desktopSonnetRouteID, desktopHaikuRouteID]
+    public static func isStableProductTierRoute(_ model: String) -> Bool {
+        [
+            defaultRouteID,
+            opusRouteID,
+            sonnetRouteID,
+            haikuRouteID,
+        ]
             .contains(model)
     }
 
@@ -87,9 +92,9 @@ public struct ScienceModelProtocolAdapter: Sendable {
             case .science:
                 displayName = Self.presentationName(for: upstream)
             case .desktop:
-                displayName = Self.desktopPresentationName(for: upstream)
+                displayName = Self.productPresentationName(for: upstream)
             case .code:
-                displayName = upstream
+                displayName = Self.productPresentationName(for: upstream)
             }
             routing[id] = upstream
             return Model(
@@ -225,12 +230,12 @@ public struct ScienceModelProtocolAdapter: Sendable {
             .contains(where: normalized.contains)
     }
 
-    private static func desktopPresentationName(for model: String) -> String {
+    private static func productPresentationName(for model: String) -> String {
         switch model {
-        case desktopDefaultRouteID: return "AIUsage Default"
-        case desktopOpusRouteID: return "AIUsage Opus"
-        case desktopSonnetRouteID: return "AIUsage Sonnet"
-        case desktopHaikuRouteID: return "AIUsage Haiku"
+        case defaultRouteID: return "AIUsage"
+        case opusRouteID: return "AIUsage Opus"
+        case sonnetRouteID: return "AIUsage Sonnet"
+        case haikuRouteID: return "AIUsage Haiku"
         default: return model
         }
     }

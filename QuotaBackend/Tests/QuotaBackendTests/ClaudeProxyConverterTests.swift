@@ -254,10 +254,10 @@ final class ClaudeProxyConverterTests: XCTestCase {
 
     func testDesktopStableTierRoutesMapThroughCurrentGatewayNode() {
         let routes = [
-            ScienceModelProtocolAdapter.desktopDefaultRouteID,
-            ScienceModelProtocolAdapter.desktopOpusRouteID,
-            ScienceModelProtocolAdapter.desktopSonnetRouteID,
-            ScienceModelProtocolAdapter.desktopHaikuRouteID,
+            ScienceModelProtocolAdapter.defaultRouteID,
+            ScienceModelProtocolAdapter.opusRouteID,
+            ScienceModelProtocolAdapter.sonnetRouteID,
+            ScienceModelProtocolAdapter.haikuRouteID,
         ]
         let config = ClaudeProxyConfiguration(
             enabled: true,
@@ -281,7 +281,7 @@ final class ClaudeProxyConverterTests: XCTestCase {
         )
         XCTAssertEqual(
             config.scienceCatalogModels.map(\.displayName),
-            ["AIUsage Default", "AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
+            ["AIUsage", "AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
         )
         XCTAssertEqual(config.mapToUpstreamModel(routes[0]), "node-a-default")
         XCTAssertEqual(config.mapToUpstreamModel(routes[1]), "node-a-large")
@@ -290,11 +290,12 @@ final class ClaudeProxyConverterTests: XCTestCase {
     }
 
     func testCodeSmartRoutesRemainStableWhileGatewayMappingChanges() {
+        XCTAssertEqual(ScienceModelProtocolAdapter.defaultRouteID, "claude-aiusage")
         let routes = [
-            ScienceModelProtocolAdapter.desktopDefaultRouteID,
-            ScienceModelProtocolAdapter.desktopOpusRouteID,
-            ScienceModelProtocolAdapter.desktopSonnetRouteID,
-            ScienceModelProtocolAdapter.desktopHaikuRouteID,
+            ScienceModelProtocolAdapter.defaultRouteID,
+            ScienceModelProtocolAdapter.opusRouteID,
+            ScienceModelProtocolAdapter.sonnetRouteID,
+            ScienceModelProtocolAdapter.haikuRouteID,
         ]
         let firstNode = ClaudeProxyConfiguration(
             enabled: true,
@@ -307,7 +308,7 @@ final class ClaudeProxyConverterTests: XCTestCase {
             defaultModel: "provider/default-a",
             exposeScienceModelCatalog: true,
             preferExactCatalogModels: true,
-            catalogRouteStyle: .desktop,
+            catalogRouteStyle: .code,
             mapDesktopTierRoutes: true
         )
         let secondNode = ClaudeProxyConfiguration(
@@ -321,7 +322,7 @@ final class ClaudeProxyConverterTests: XCTestCase {
             defaultModel: "provider/default-b",
             exposeScienceModelCatalog: true,
             preferExactCatalogModels: true,
-            catalogRouteStyle: .desktop,
+            catalogRouteStyle: .code,
             mapDesktopTierRoutes: true
         )
 
@@ -331,6 +332,32 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(secondNode.mapToUpstreamModel(routes[0]), "provider/default-b")
         XCTAssertEqual(firstNode.mapToUpstreamModel(routes[1]), "GLM-5.2")
         XCTAssertEqual(secondNode.mapToUpstreamModel(routes[1]), "provider/opus-b")
+        XCTAssertEqual(
+            firstNode.scienceCatalogModels.map(\.displayName),
+            ["AIUsage", "AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
+        )
+    }
+
+    func testDesktopFullCatalogPublishesOnlyExactNodeModels() {
+        let realModels = ["GLM-5.2", "provider/custom-opus"]
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "app-opus-override",
+            middleModel: "app-sonnet-override",
+            smallModel: "app-haiku-override",
+            availableModels: realModels,
+            defaultModel: realModels[0],
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            mapDesktopTierRoutes: false
+        )
+
+        XCTAssertEqual(config.scienceCatalogModels.map(\.upstreamModel), realModels)
+        XCTAssertEqual(config.mapToUpstreamModel(realModels[0]), realModels[0])
+        XCTAssertEqual(config.mapToUpstreamModel(realModels[1]), realModels[1])
     }
 
     func testCodeFullCatalogPublishesAndRoutesExactModelIDs() {
@@ -358,7 +385,7 @@ final class ClaudeProxyConverterTests: XCTestCase {
     }
 
     func testDesktopFullCatalogDoesNotGuessStableTierRouteFromRealModelName() {
-        let realModel = ScienceModelProtocolAdapter.desktopOpusRouteID
+        let realModel = ScienceModelProtocolAdapter.opusRouteID
         let config = ClaudeProxyConfiguration(
             enabled: true,
             upstreamBaseURL: "https://api.example.com",

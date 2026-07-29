@@ -72,10 +72,10 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     var expectedClientKey: String
     var defaultModel: String
     var modelMapping: ModelMapping
-    /// 模型库：节点内预配置的「模型名 + 独立定价」清单（与 OpenCode 的 modelEntries 同构）。
-    /// 定价唯一来源（查询顺序见 pricingForModel）；槽位/默认模型从库中点选即可切换，
-    /// 无需重填名称与价格。旧档案无此字段时为空，计价自动回退槽位价格。
-    var modelLibrary: [MappedModel]
+    /// 节点模型目录。可用模型与费用规则是两套独立数据：
+    /// - `models` 决定 Code / Desktop / Science 可选择和转发哪些真实模型；
+    /// - `pricingOverrides` 只影响费用估算，缺失即“未定价”，不会被误判为免费。
+    var modelCatalog: ModelCatalog
     var maxOutputTokens: Int // 0 = no cap, pass through original value
     var enableModelAliasMapping: Bool
     /// Legacy per-node HTTPS contract retained for imported profiles and
@@ -91,17 +91,48 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     }
 
     struct ModelPricing: Codable, Equatable {
+        struct Source: Codable, Equatable {
+            enum Kind: String, Codable {
+                case manual
+                case modelsDev
+            }
+
+            var kind: Kind
+            var label: String
+            var referenceURL: String?
+            var updatedAt: Date
+
+            static var manual: Source {
+                Source(
+                    kind: .manual,
+                    label: L("Manual", "手动"),
+                    referenceURL: nil,
+                    updatedAt: Date()
+                )
+            }
+        }
+
         var inputPerMillion: Double         // per 1M input tokens (in configured currency)
         var outputPerMillion: Double        // per 1M output tokens
         var cacheCreatePerMillion: Double   // per 1M cache write tokens (~1.25× input by default)
         var cacheReadPerMillion: Double     // per 1M cache read tokens (~0.1× input by default)
         var currency: PricingCurrency
+        var source: Source?
 
         static let defaultCacheWriteMultiplier: Double = 1.25
         static let defaultCacheReadMultiplier: Double = 0.1
 
         static var zero: ModelPricing {
             ModelPricing(inputPerMillion: 0, outputPerMillion: 0, cacheCreatePerMillion: 0, cacheReadPerMillion: 0, currency: .usd)
+        }
+
+        /// 仅用于迁移旧配置：旧 UI 会为同步模型自动写入全零价格，
+        /// 这种记录应迁移为“未设置”，而不是明确免费。
+        var hasAnyRate: Bool {
+            inputPerMillion != 0
+                || outputPerMillion != 0
+                || cacheCreatePerMillion != 0
+                || cacheReadPerMillion != 0
         }
 
         /// CNY → USD 折算用用户配置的全局汇率（AppSettings.cnyPerUSD，默认 7），
@@ -135,13 +166,15 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             outputPerMillion: Double = 0,
             cacheCreatePerMillion: Double = 0,
             cacheReadPerMillion: Double = 0,
-            currency: PricingCurrency = .usd
+            currency: PricingCurrency = .usd,
+            source: Source? = nil
         ) {
             self.inputPerMillion = inputPerMillion
             self.outputPerMillion = outputPerMillion
             self.cacheCreatePerMillion = cacheCreatePerMillion
             self.cacheReadPerMillion = cacheReadPerMillion
             self.currency = currency
+            self.source = source
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -151,6 +184,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             case cacheCreatePerMillion
             case cacheReadPerMillion
             case currency
+            case source
         }
 
         init(from decoder: Decoder) throws {
@@ -176,6 +210,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             }
 
             currency = try container.decodeIfPresent(PricingCurrency.self, forKey: .currency) ?? .usd
+            source = try container.decodeIfPresent(Source.self, forKey: .source)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -186,6 +221,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             try container.encode(cacheReadPerMillion, forKey: .cacheReadPerMillion)
             try container.encode(cacheReadPerMillion, forKey: .cachePerMillion)
             try container.encode(currency, forKey: .currency)
+            try container.encodeIfPresent(source, forKey: .source)
         }
     }
 
@@ -199,51 +235,164 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         }
     }
 
+    struct ModelCatalog: Codable, Equatable {
+        var models: [String]
+        var pricingOverrides: [String: ModelPricing]
+
+        private enum CodingKeys: String, CodingKey {
+            case models, pricingOverrides
+        }
+
+        static var empty: ModelCatalog {
+            ModelCatalog(models: [], pricingOverrides: [:])
+        }
+
+        init(models: [String] = [], pricingOverrides: [String: ModelPricing] = [:]) {
+            var seen = Set<String>()
+            var normalizedModels = models
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && seen.insert($0).inserted }
+
+            var normalizedPricing: [String: ModelPricing] = [:]
+            for (rawName, pricing) in pricingOverrides {
+                let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { continue }
+                normalizedPricing[name] = pricing
+                if seen.insert(name).inserted {
+                    normalizedModels.append(name)
+                }
+            }
+
+            self.models = normalizedModels
+            self.pricingOverrides = normalizedPricing
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                models: try container.decodeIfPresent([String].self, forKey: .models) ?? [],
+                pricingOverrides: try container.decodeIfPresent(
+                    [String: ModelPricing].self,
+                    forKey: .pricingOverrides
+                ) ?? [:]
+            )
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(models, forKey: .models)
+            try container.encode(pricingOverrides, forKey: .pricingOverrides)
+        }
+
+        init(mappedModels: [MappedModel]) {
+            var pricing: [String: ModelPricing] = [:]
+            for model in mappedModels {
+                let name = model.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, model.pricing.hasAnyRate else { continue }
+                pricing[name] = model.pricing
+            }
+            self.init(models: mappedModels.map(\.name), pricingOverrides: pricing)
+        }
+
+        static func migrated(
+            legacyLibrary: [MappedModel],
+            legacyMapping: LegacyModelMapping,
+            defaultModel: String
+        ) -> ModelCatalog {
+            var prices: [String: ModelPricing] = [:]
+            for entry in legacyLibrary where entry.pricing.hasAnyRate {
+                let name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty { prices[name] = entry.pricing }
+            }
+            for route in legacyMapping.routes {
+                let name = route.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, prices[name] == nil else { continue }
+                if let pricing = route.pricing, pricing.hasAnyRate {
+                    prices[name] = pricing
+                }
+            }
+            return ModelCatalog(
+                models: legacyLibrary.map(\.name) + legacyMapping.routes.map(\.name) + [defaultModel],
+                pricingOverrides: prices
+            )
+        }
+
+        mutating func mergeModels(_ names: [String]) {
+            self = ModelCatalog(models: models + names, pricingOverrides: pricingOverrides)
+        }
+    }
+
+    /// 应用模型槽位只负责“别名 → 真实模型名”，不再携带价格副本。
+    struct ModelRoute: Codable, Equatable {
+        var name: String
+
+        init(name: String) {
+            self.name = name
+        }
+    }
+
     struct ModelMapping: Codable, Equatable {
-        var bigModel: MappedModel      // opus -> this
-        var middleModel: MappedModel   // sonnet -> this
-        var smallModel: MappedModel    // haiku -> this
+        var bigModel: ModelRoute      // opus -> this
+        var middleModel: ModelRoute   // sonnet -> this
+        var smallModel: ModelRoute    // haiku -> this
 
         static var openAIDefault: ModelMapping {
             ModelMapping(
-                bigModel: MappedModel(name: "gpt-5.5"),
-                middleModel: MappedModel(name: "gpt-5.4-mini"),
-                smallModel: MappedModel(name: "gpt-4o-mini")
+                bigModel: ModelRoute(name: "gpt-5.5"),
+                middleModel: ModelRoute(name: "gpt-5.4-mini"),
+                smallModel: ModelRoute(name: "gpt-4o-mini")
             )
         }
 
         static var anthropicDefault: ModelMapping {
             ModelMapping(
-                bigModel: MappedModel(name: "claude-opus-4-6"),
-                middleModel: MappedModel(name: "claude-sonnet-4-6"),
-                smallModel: MappedModel(name: "claude-haiku-4-5")
+                bigModel: ModelRoute(name: "claude-opus-4-6"),
+                middleModel: ModelRoute(name: "claude-sonnet-4-6"),
+                smallModel: ModelRoute(name: "claude-haiku-4-5")
             )
         }
 
         /// Codex 节点只有一个有效模型（存 bigModel），middle/small 留空不参与定价/统计。
         static var codexDefault: ModelMapping {
             ModelMapping(
-                bigModel: MappedModel(name: "gpt-5.5"),
-                middleModel: MappedModel(name: ""),
-                smallModel: MappedModel(name: "")
+                bigModel: ModelRoute(name: "gpt-5.5"),
+                middleModel: ModelRoute(name: ""),
+                smallModel: ModelRoute(name: "")
             )
         }
 
         static var `default`: ModelMapping { openAIDefault }
+    }
 
-        func pricingForUpstreamModel(_ model: String) -> ModelPricing? {
-            if bigModel.name == model { return bigModel.pricing }
-            if middleModel.name == model { return middleModel.pricing }
-            if smallModel.name == model { return smallModel.pricing }
-            return nil
+    /// 仅用于读取 0.15.x 及更早的槽位价格；新配置不会再写入这些价格副本。
+    struct LegacyModelRoute: Codable {
+        var name: String
+        var pricing: ModelPricing?
+    }
+
+    struct LegacyModelMapping: Codable {
+        var bigModel: LegacyModelRoute
+        var middleModel: LegacyModelRoute
+        var smallModel: LegacyModelRoute
+
+        init(current: ModelMapping) {
+            bigModel = LegacyModelRoute(name: current.bigModel.name, pricing: nil)
+            middleModel = LegacyModelRoute(name: current.middleModel.name, pricing: nil)
+            smallModel = LegacyModelRoute(name: current.smallModel.name, pricing: nil)
         }
 
-        func pricingForFamily(of model: String) -> ModelPricing? {
-            guard let family = ProxyConfiguration.modelFamilyHint(for: model) else { return nil }
-            if ProxyConfiguration.modelFamilyHint(for: bigModel.name) == family { return bigModel.pricing }
-            if ProxyConfiguration.modelFamilyHint(for: middleModel.name) == family { return middleModel.pricing }
-            if ProxyConfiguration.modelFamilyHint(for: smallModel.name) == family { return smallModel.pricing }
-            return nil
+        var current: ModelMapping {
+            ModelMapping(
+                bigModel: ModelRoute(name: bigModel.name),
+                middleModel: ModelRoute(name: middleModel.name),
+                smallModel: ModelRoute(name: smallModel.name)
+            )
+        }
+
+        var routes: [LegacyModelRoute] {
+            [bigModel, middleModel, smallModel].filter {
+                !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
         }
     }
 
@@ -264,7 +413,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         expectedClientKey: String = "",
         defaultModel: String = "",
         modelMapping: ModelMapping = .default,
-        modelLibrary: [MappedModel] = [],
+        modelCatalog: ModelCatalog = .empty,
         maxOutputTokens: Int = 0,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
@@ -291,7 +440,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         self.expectedClientKey = expectedClientKey
         self.defaultModel = defaultModel
         self.modelMapping = modelMapping
-        self.modelLibrary = modelLibrary
+        self.modelCatalog = modelCatalog
         self.maxOutputTokens = maxOutputTokens
         self.enableModelAliasMapping = enableModelAliasMapping
         self.enableHTTPS = enableHTTPS
@@ -300,10 +449,21 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         self.lastUsedAt = lastUsedAt
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, nodeType, isEnabled
+        case anthropicBaseURL, anthropicAPIKey, usePassthroughProxy
+        case host, port, allowLAN
+        case upstreamBaseURL, openAIUpstreamAPI, upstreamAPIKey, expectedClientKey
+        case defaultModel, modelMapping, modelCatalog
+        case modelLibrary // 0.15.x 及更早，仅解码迁移
+        case maxOutputTokens, enableModelAliasMapping, enableHTTPS, httpsPort
+        case createdAt, lastUsedAt
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         nodeType = try container.decodeIfPresent(NodeType.self, forKey: .nodeType) ?? .openaiProxy
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
         anthropicBaseURL = try container.decodeIfPresent(String.self, forKey: .anthropicBaseURL) ?? "https://api.anthropic.com"
@@ -311,24 +471,67 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         usePassthroughProxy = nodeType == .anthropicDirect
             ? true
             : (try container.decodeIfPresent(Bool.self, forKey: .usePassthroughProxy) ?? false)
-        host = try container.decode(String.self, forKey: .host)
-        port = try container.decode(Int.self, forKey: .port)
-        allowLAN = try container.decode(Bool.self, forKey: .allowLAN)
+        host = try container.decodeIfPresent(String.self, forKey: .host) ?? "127.0.0.1"
+        port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 8080
+        allowLAN = try container.decodeIfPresent(Bool.self, forKey: .allowLAN) ?? false
         upstreamBaseURL = ClaudeProxyConfiguration.normalizeOpenAIBaseURL(
-            try container.decode(String.self, forKey: .upstreamBaseURL)
+            try container.decodeIfPresent(String.self, forKey: .upstreamBaseURL) ?? "https://api.openai.com"
         )
         openAIUpstreamAPI = try container.decodeIfPresent(OpenAIUpstreamAPI.self, forKey: .openAIUpstreamAPI) ?? .chatCompletions
-        upstreamAPIKey = try container.decode(String.self, forKey: .upstreamAPIKey)
-        expectedClientKey = try container.decode(String.self, forKey: .expectedClientKey)
+        upstreamAPIKey = try container.decodeIfPresent(String.self, forKey: .upstreamAPIKey) ?? ""
+        expectedClientKey = try container.decodeIfPresent(String.self, forKey: .expectedClientKey) ?? ""
         defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? ""
-        modelMapping = try container.decode(ModelMapping.self, forKey: .modelMapping)
-        modelLibrary = try container.decodeIfPresent([MappedModel].self, forKey: .modelLibrary) ?? []
+        let defaultMapping: ModelMapping = nodeType.isCodex ? .codexDefault
+            : (nodeType == .anthropicDirect ? .anthropicDefault : .openAIDefault)
+        let legacyMapping = try container.decodeIfPresent(LegacyModelMapping.self, forKey: .modelMapping)
+            ?? LegacyModelMapping(current: defaultMapping)
+        modelMapping = legacyMapping.current
+        if let currentCatalog = try container.decodeIfPresent(ModelCatalog.self, forKey: .modelCatalog) {
+            modelCatalog = ModelCatalog(
+                models: currentCatalog.models,
+                pricingOverrides: currentCatalog.pricingOverrides
+            )
+        } else {
+            let legacyLibrary = try container.decodeIfPresent([MappedModel].self, forKey: .modelLibrary) ?? []
+            modelCatalog = .migrated(
+                legacyLibrary: legacyLibrary,
+                legacyMapping: legacyMapping,
+                defaultModel: defaultModel
+            )
+        }
         maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens) ?? 0
         enableModelAliasMapping = try container.decodeIfPresent(Bool.self, forKey: .enableModelAliasMapping) ?? false
         enableHTTPS = try container.decodeIfPresent(Bool.self, forKey: .enableHTTPS) ?? false
         httpsPort = try container.decodeIfPresent(Int.self, forKey: .httpsPort)
-        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(nodeType, forKey: .nodeType)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(anthropicBaseURL, forKey: .anthropicBaseURL)
+        try container.encode(anthropicAPIKey, forKey: .anthropicAPIKey)
+        try container.encode(usePassthroughProxy, forKey: .usePassthroughProxy)
+        try container.encode(host, forKey: .host)
+        try container.encode(port, forKey: .port)
+        try container.encode(allowLAN, forKey: .allowLAN)
+        try container.encode(upstreamBaseURL, forKey: .upstreamBaseURL)
+        try container.encode(openAIUpstreamAPI, forKey: .openAIUpstreamAPI)
+        try container.encode(upstreamAPIKey, forKey: .upstreamAPIKey)
+        try container.encode(expectedClientKey, forKey: .expectedClientKey)
+        try container.encode(defaultModel, forKey: .defaultModel)
+        try container.encode(modelMapping, forKey: .modelMapping)
+        try container.encode(modelCatalog, forKey: .modelCatalog)
+        try container.encode(maxOutputTokens, forKey: .maxOutputTokens)
+        try container.encode(enableModelAliasMapping, forKey: .enableModelAliasMapping)
+        try container.encode(enableHTTPS, forKey: .enableHTTPS)
+        try container.encodeIfPresent(httpsPort, forKey: .httpsPort)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
     }
 
     var bindAddress: String {
@@ -360,7 +563,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     /// node from applying a second tier mapping.
     var runtimeModelCatalog: [String] {
         var seen = Set<String>()
-        return (modelLibrary.map(\.name) + [
+        return (modelCatalog.models + [
             defaultModel,
             modelMapping.bigModel.name,
             modelMapping.middleModel.name,
@@ -381,17 +584,11 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         expectedClientKey.isEmpty ? "proxy-key" : expectedClientKey
     }
 
-    /// 计价查询：模型库精确匹配 → 槽位精确匹配 → 槽位家族匹配 → 模型库家族匹配。
-    /// 模型库是定价唯一来源；旧档案（库为空）自动回退槽位价格，行为不变。
+    /// 费用规则只做真实模型名精确匹配。没有规则即“未定价”；
+    /// 不再从应用槽位或模型家族猜价，避免模型同步后被误记为免费。
     func pricingForModel(_ model: String) -> ModelPricing? {
-        if let p = modelLibrary.first(where: { $0.name == model })?.pricing { return p }
-        if let p = modelMapping.pricingForUpstreamModel(model) { return p }
-        if let p = modelMapping.pricingForFamily(of: model) { return p }
-        if let family = Self.modelFamilyHint(for: model),
-           let p = modelLibrary.first(where: { Self.modelFamilyHint(for: $0.name) == family })?.pricing {
-            return p
-        }
-        return nil
+        let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return modelCatalog.pricingOverrides[name]
     }
 
     var normalizedUpstreamBaseURL: String {
@@ -404,13 +601,6 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         return copy
     }
 
-    private static func modelFamilyHint(for model: String) -> String? {
-        let normalized = model.lowercased()
-        if normalized.contains("opus") { return "opus" }
-        if normalized.contains("sonnet") { return "sonnet" }
-        if normalized.contains("haiku") { return "haiku" }
-        return nil
-    }
 }
 
 // MARK: - Proxy Statistics

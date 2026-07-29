@@ -33,6 +33,13 @@ final class ScienceProxyManager: ObservableObject {
 
     private init() {
         self.config = GlobalProxyStore.load(track: .science)
+        // Science is an application-local adapter. Network exposure belongs
+        // to Node runtimes, while both the inference bridge and web surface
+        // stay on loopback.
+        if config.effectiveAllowLAN {
+            config.allowLAN = false
+            _ = GlobalProxyStore.save(config, track: .science)
+        }
     }
 
     // MARK: - Derived
@@ -93,8 +100,8 @@ final class ScienceProxyManager: ObservableObject {
         return availableNodes().first { $0.id == id }
     }
 
-    /// Build the Science picker from the node's authoritative Model Library &
-    /// Pricing collection. Legacy nodes with an empty library fall back to the
+    /// Build the Science picker from the node's authoritative model catalog.
+    /// Legacy nodes with an empty catalog fall back to the
     /// configured default and three tier mappings.
     /// The exact catalog exposed by Science for a selected node. The management
     /// view uses the same value so its preview cannot drift from the HTTP API.
@@ -104,7 +111,7 @@ final class ScienceProxyManager: ObservableObject {
         }) else { return nil }
 
         var protocolCatalog = ScienceModelProtocolAdapter(
-            upstreamModels: node.modelLibrary.map(\.name),
+            upstreamModels: node.modelCatalog.models,
             requestedDefault: node.defaultModel
         )
         if protocolCatalog.models.isEmpty {
@@ -144,8 +151,8 @@ final class ScienceProxyManager: ObservableObject {
     /// node so the user knows to fix the node's model configuration.
     private static func emptyCatalogMessage(nodeName: String) -> String {
         AppSettings.shared.t(
-            "Node \"\(nodeName)\" has no usable models. Add models to its Model Library & Pricing (or set a default model) and try again.",
-            "节点「\(nodeName)」没有可用模型。请先在该节点的「模型库与定价」中添加模型（或设置默认模型）后重试。"
+            "Node \"\(nodeName)\" has no usable models. Sync available models in the node editor (or set a default model) and try again.",
+            "节点「\(nodeName)」没有可用模型。请先在节点编辑器中同步可用模型（或设置默认模型）后重试。"
         )
     }
 
@@ -263,10 +270,10 @@ final class ScienceProxyManager: ObservableObject {
         persist()
     }
 
-    /// 更新是否允许局域网访问。仅停用态可改。
+    /// Compatibility shim for older callers/configurations. Science remains local-only.
     func updateAllowLAN(_ allowLAN: Bool) {
         guard !config.isEnabled else { return }
-        config.allowLAN = allowLAN
+        config.allowLAN = false
         persist()
     }
 
@@ -420,7 +427,7 @@ final class ScienceProxyManager: ObservableObject {
         do {
             try await ProxyViewModel.shared.acquireNodeRuntime(nodeId, consumer: .science)
             leasedNodeId = nodeId
-            try await runtime.start(port: config.port, bindHost: config.bindAddress, env: env, nodeId: node.id, nodeName: node.name)
+            try await runtime.start(port: config.port, bindHost: "127.0.0.1", env: env, nodeId: node.id, nodeName: node.name)
         } catch is CancellationError {
             // Release the Node Runtime lease acquired by this start attempt.
             // A newer lifecycle operation will acquire its own lease.

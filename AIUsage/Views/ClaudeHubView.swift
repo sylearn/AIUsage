@@ -140,7 +140,6 @@ private struct ClaudeCodeRoutingView: View {
     @State private var showSettingsHelp = false
     @State private var showModelHelp = false
     @State private var selectedNodeID = ""
-    @State private var showAllCodeModels = false
     @State private var effortLevel: ClaudeCodePersistentEffort = .auto
     @State private var effortError: String?
 
@@ -164,17 +163,6 @@ private struct ClaudeCodeRoutingView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 0) {
-                    routeStep("terminal", "Claude Code", active: gateway.isEnabled)
-                    routeLine
-                    routeStep("arrow.triangle.branch", L("Code port :\(gateway.config.port)", "Code 端口 :\(gateway.config.port)"), active: gateway.isProxyRunning)
-                    routeLine
-                    routeStep("server.rack", gateway.node(for: gateway.activeNodeId)?.name ?? L("Choose Node", "选择节点"), active: gateway.activeNodeId != nil)
-                }
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.indigo.opacity(0.055)))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.indigo.opacity(0.18)))
-
                 ClaudeGlobalProxySection(selectedNodeId: $selectedNodeID)
                 codeModelsCard
                 applicationConfigCard
@@ -191,10 +179,6 @@ private struct ClaudeCodeRoutingView: View {
         .onChange(of: gateway.activeNodeId) { _, newValue in
             guard let newValue else { return }
             selectedNodeID = newValue
-            showAllCodeModels = false
-        }
-        .onChange(of: gateway.config.effectiveClaudeCodeCatalogMode) { _, _ in
-            showAllCodeModels = false
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             reloadEffortLevel()
@@ -202,20 +186,6 @@ private struct ClaudeCodeRoutingView: View {
         .sheet(isPresented: $showSettingsEditor) {
             LocalSettingsEditorView()
         }
-    }
-
-    private func routeStep(_ symbol: String, _ title: String, active: Bool) -> some View {
-        Label(title, systemImage: symbol)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(active ? Color.indigo : Color.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(active ? Color.indigo.opacity(0.11) : Color.secondary.opacity(0.08)))
-    }
-
-    private var routeLine: some View {
-        Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1).frame(maxWidth: .infinity)
     }
 
     private var applicationConfigCard: some View {
@@ -347,8 +317,12 @@ private struct ClaudeCodeRoutingView: View {
                     Text(L("Code models", "Code 模型"))
                         .font(.headline)
                     Text(L(
-                        "Application routes for the selected node",
-                        "当前节点在 Code 中使用的应用侧路由"
+                        gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
+                            ? "Four stable routes · live mapping"
+                            : "Four Code aliases · real model names",
+                        gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
+                            ? "四条固定路由 · 映射即时生效"
+                            : "四个 Code 别名 · 使用真实模型名"
                     ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -377,40 +351,6 @@ private struct ClaudeCodeRoutingView: View {
                     codeModelHelpPopover
                 }
             }
-
-            ClaudeModelModeSelector(
-                selection: gateway.config.effectiveClaudeCodeCatalogMode,
-                brand: .indigo,
-                nodeModelsDetail: L("Real names · restart Code", "真实名称 · 需重启 Code"),
-                isDisabled: gateway.isBusy,
-                onSelect: { mode in
-                    Task { await gateway.updateClaudeCodeCatalogMode(mode) }
-                }
-            )
-
-            Label(
-                gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
-                    ? L(
-                        "Claude Code saves stable AIUsage routes; the Gateway can change the real model without restarting the session.",
-                        "Claude Code 只保存稳定的 AIUsage 路由；Gateway 可替换右侧真实模型，无需重启会话。"
-                    )
-                    : L(
-                        "Claude Code sees real node model names. Restart Code after changing this catalog or its startup model.",
-                        "Claude Code 会看到节点真实模型名；修改模型库或启动模型后需重启 Code。"
-                    ),
-                systemImage: gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
-                    ? "arrow.triangle.2.circlepath"
-                    : "arrow.clockwise"
-            )
-            .font(.caption)
-            .foregroundStyle(gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes ? Color.indigo : Color.secondary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.indigo.opacity(gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes ? 0.07 : 0.035))
-            )
 
             if let node = selectedNode {
                 let nodeDefaults = ClaudeAppResolvedModels(
@@ -442,29 +382,10 @@ private struct ClaudeCodeRoutingView: View {
                         Task { await gateway.resetClaudeCodeModelOverrides(nodeID: node.id) }
                     }
                 )
-
-                catalogLabel(
-                    gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
-                        ? L("Models available for route mapping", "可用于映射的节点模型")
-                        : L("Real model names discovered by Code", "Code 可发现的真实模型")
-                )
-
-                ClaudeModelCatalogGrid(
-                    items: node.runtimeModelCatalog.map { model in
-                        ClaudeModelCatalogItem(
-                            id: model,
-                            title: model,
-                            help: model,
-                            isDefault: model == resolved.defaultModel
-                        )
-                    },
-                    brand: .indigo,
-                    showAll: $showAllCodeModels
-                )
             } else {
                 Text(L(
-                    "Choose a node with a configured Model Library.",
-                    "请选择已配置模型库的节点。"
+                    "Choose a node with at least one available model.",
+                    "请选择至少包含一个可用模型的节点。"
                 ))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -475,12 +396,6 @@ private struct ClaudeCodeRoutingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
-    }
-
-    private func catalogLabel(_ title: String) -> some View {
-        Label(title, systemImage: "list.bullet.rectangle")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
     }
 
     private var codeModelHelpPopover: some View {
@@ -526,12 +441,10 @@ struct ClaudeDesktopIntegrationView: View {
     @State private var showConnectionHelp = false
     @State private var showModelModeHelp = false
     @State private var showModelManager = false
-    @State private var isModelManagerHovered = false
     @State private var desktopPortDraft = ""
     @State private var portSaveMessage: String?
     @State private var portSaveError: String?
     @State private var pendingCatalogMode: ClaudeDesktopCatalogMode?
-    @State private var showAllDesktopModels = false
     @FocusState private var isPortFieldFocused: Bool
 
     private var nodes: [GlobalProxyNodeRef] { gateway.availableNodes() }
@@ -565,12 +478,10 @@ struct ClaudeDesktopIntegrationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                heroCard
-                if nodes.isEmpty { noNodesCard }
+                desktopGatewayCard
                 modelCard
-                desktopPortCard
             }
-            .frame(maxWidth: 900)
+            .frame(maxWidth: 960)
             .padding(20)
             .frame(maxWidth: .infinity)
         }
@@ -583,9 +494,7 @@ struct ClaudeDesktopIntegrationView: View {
         .onChange(of: gateway.activeNodeId) { _, newValue in
             guard let newValue else { return }
             selectedNodeID = newValue
-            showAllDesktopModels = false
         }
-        .onChange(of: catalogMode) { _, _ in showAllDesktopModels = false }
         .onChange(of: gateway.config.effectiveClaudeDesktopHTTPSPort) { _, _ in
             if !isPortFieldFocused { syncDesktopPortDraft() }
         }
@@ -615,165 +524,141 @@ struct ClaudeDesktopIntegrationView: View {
         }
     }
 
-    private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(Self.brand.opacity(0.12))
-                    Image(systemName: "macwindow")
-                        .font(.system(size: 23, weight: .semibold))
-                        .foregroundStyle(Self.brand)
-                }
-                .frame(width: 48, height: 48)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text("Claude Desktop")
-                            .font(.title3.weight(.bold))
-                        Text("v\(manager.versionLabel)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.secondary.opacity(0.10)))
-                    }
-                    Text(L(
-                        "Gateway routes and models",
-                        "Gateway 路由与模型"
-                    ))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 12)
-                statusBadge
-            }
-
-            sharedRoute
-
-            HStack(spacing: 10) {
-                primaryButton
-                if manager.installation.isInstalled {
-                    Button {
-                        Task { await manager.openClaudeDesktop() }
-                    } label: {
-                        Label(L("Open Claude", "打开 Claude"), systemImage: "arrow.up.forward.app")
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.bordered)
-                    .disabled(manager.isBusy)
-                }
-                Spacer(minLength: 0)
-            }
-
-            stateMessage
-        }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+    private var desktopGatewayCard: some View {
+        ClaudeProductGatewayCard(
+            brand: Self.brand,
+            systemImage: "macwindow",
+            title: L("Desktop Gateway", "Desktop 网关"),
+            subtitle: "Claude Desktop · v\(manager.versionLabel)",
+            statusText: statusTitle,
+            statusColor: statusColor,
+            isEnabled: manager.isConfigured,
+            isBusy: manager.isBusy,
+            hasNodes: !nodes.isEmpty,
+            emptyHint: L("Create a Claude node first.", "请先创建 Claude 节点。"),
+            endpoint: "127.0.0.1:\(gateway.config.effectiveClaudeDesktopHTTPSPort)",
+            mode: catalogMode,
+            effectText: catalogMode == .smartRoutes
+                ? L("Live", "即时生效")
+                : L("Auto reload", "自动重载"),
+            effectSymbol: catalogMode == .smartRoutes ? "bolt.fill" : "arrow.clockwise",
+            effectColor: catalogMode == .smartRoutes ? .green : .orange,
+            isToggleDisabled: (!manager.isConfigured && (resolvedNodeID == nil || !manager.installation.isInstalled)),
+            toggle: desktopGatewayToggle,
+            onModeSelect: requestCatalogMode,
+            nodeControl: { desktopNodeControl },
+            config: { desktopGatewayConfig },
+            extraAction: { desktopOpenButton },
+            message: { stateMessage }
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(statusColor.opacity(manager.isConfigured ? 0.45 : 0.12), lineWidth: 1)
+    }
+
+    private var desktopNodeControl: some View {
+        GlobalProxyChipMenu(
+            brand: Self.brand,
+            title: nodes.first(where: { $0.id == resolvedNodeID })?.name ?? L("Choose node", "选择节点"),
+            systemImage: "bolt.fill",
+            isDisabled: manager.isBusy || nodes.isEmpty,
+            items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
+            selectedId: resolvedNodeID ?? "",
+            onSelect: selectNode
         )
-        .animation(.easeInOut(duration: 0.2), value: manager.state)
     }
 
-    private var sharedRoute: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(
-                    L("Desktop Gateway route", "Desktop 独立网关路由"),
-                    systemImage: "point.3.connected.trianglepath.dotted"
-                )
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                GlobalProxyChipMenu(
-                    brand: Self.brand,
-                    title: nodes.first(where: { $0.id == resolvedNodeID })?.name ?? L("Choose node", "选择节点"),
-                    systemImage: "bolt.fill",
-                    isDisabled: manager.isBusy || nodes.isEmpty,
-                    items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
-                    selectedId: resolvedNodeID ?? "",
-                    onSelect: selectNode
-                )
+    private var desktopGatewayToggle: Binding<Bool> {
+        Binding(
+            get: { manager.isConfigured },
+            set: { enabled in
+                if enabled {
+                    guard let nodeID = resolvedNodeID else { return }
+                    Task { await manager.connect(activeNodeId: nodeID) }
+                } else {
+                    Task { await manager.disconnect() }
+                }
             }
-
-            HStack(spacing: 0) {
-                routeEndpoint(icon: "macwindow", title: "Desktop", active: manager.isConfigured)
-                routeLine
-                routeEndpoint(icon: "lock.shield.fill", title: ":\(gateway.config.effectiveClaudeDesktopHTTPSPort)", active: manager.isConfigured)
-                routeLine
-                routeEndpoint(icon: "server.rack", title: selectedNode?.name ?? L("Claude node", "Claude 节点"), active: selectedNode != nil)
-            }
-        }
-        .padding(13)
-        .background(RoundedRectangle(cornerRadius: 13).fill(Color.primary.opacity(0.035)))
-    }
-
-    private func routeEndpoint(icon: String, title: String, active: Bool) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .foregroundStyle(active ? Self.brand : Color.secondary)
-            Text(title)
-                .lineLimit(1)
-        }
-        .font(.caption.weight(.medium))
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .background(Capsule().fill(active ? Self.brand.opacity(0.10) : Color.secondary.opacity(0.08)))
-    }
-
-    private var routeLine: some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.25))
-            .frame(height: 1)
-            .frame(maxWidth: .infinity)
-    }
-
-    private var statusBadge: some View {
-        Label(statusTitle, systemImage: statusSymbol)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(statusColor)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(statusColor.opacity(0.11)))
+        )
     }
 
     @ViewBuilder
-    private var primaryButton: some View {
-        if manager.isConfigured {
+    private var desktopOpenButton: some View {
+        if manager.installation.isInstalled {
             Button {
-                Task { await manager.disconnect() }
+                Task { await manager.openClaudeDesktop() }
             } label: {
-                Label(
-                    manager.isBusy ? L("Working…", "处理中…") : L("Disconnect & Restore", "断开并恢复"),
-                    systemImage: "arrow.uturn.backward"
-                )
-                .frame(minWidth: 155)
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Self.brand)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Self.brand.opacity(0.09)))
+                    .overlay(Circle().stroke(Self.brand.opacity(0.15)))
             }
-            .controlSize(.large)
-            .buttonStyle(.bordered)
-            .tint(.red)
+            .buttonStyle(.plain)
             .disabled(manager.isBusy)
-        } else {
-            Button {
-                guard let nodeID = resolvedNodeID else { return }
-                Task { await manager.connect(activeNodeId: nodeID) }
-            } label: {
-                Label(
-                    manager.isBusy ? L("Connecting…", "正在连接…") : L("Connect to Desktop", "一键接入 Desktop"),
-                    systemImage: "bolt.horizontal.fill"
-                )
-                .frame(minWidth: 155)
-            }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
-            .tint(Self.brand)
-            .disabled(manager.isBusy || resolvedNodeID == nil || !manager.installation.isInstalled)
+            .help(L("Open Claude Desktop", "打开 Claude Desktop"))
         }
+    }
+
+    private var desktopGatewayConfig: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Label(L("Local gateway", "本机网关"), systemImage: "lock.shield")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    showConnectionHelp.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showConnectionHelp, arrowEdge: .top) {
+                    connectionHelpPopover
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
+                GlobalProxyField(label: L("Local HTTPS port", "本机 HTTPS 端口")) {
+                    TextField("14403", text: $desktopPortDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospacedDigit())
+                        .frame(width: 118)
+                        .focused($isPortFieldFocused)
+                        .onChange(of: desktopPortDraft) { _, newValue in
+                            let filtered = String(newValue.filter(\.isNumber).prefix(5))
+                            if filtered != newValue { desktopPortDraft = filtered }
+                            portSaveMessage = nil
+                            portSaveError = nil
+                        }
+                }
+
+                Button(L("Restore default", "恢复默认")) {
+                    desktopPortDraft = String(GlobalProxyConfig.defaultClaudeDesktopHTTPSPort)
+                }
+                .buttonStyle(.bordered)
+                .disabled(manager.isBusy)
+
+                Button(L("Save", "保存")) {
+                    saveDesktopPort()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Self.brand)
+                .disabled(!canSaveDesktopPort)
+                Spacer(minLength: 0)
+            }
+
+            if let portValidationMessage {
+                inlinePortMessage(symbol: "exclamationmark.triangle.fill", text: portValidationMessage, color: .orange)
+            } else if let portSaveError {
+                inlinePortMessage(symbol: "xmark.circle.fill", text: portSaveError, color: .red)
+            } else if let portSaveMessage {
+                inlinePortMessage(symbol: "checkmark.circle.fill", text: portSaveMessage, color: .green)
+            }
+        }
+        .padding(11)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Self.brand.opacity(0.045)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Self.brand.opacity(0.10)))
     }
 
     @ViewBuilder
@@ -812,11 +697,19 @@ struct ClaudeDesktopIntegrationView: View {
                 Text(L("Desktop models", "Desktop 模型"))
                     .font(.headline)
                 Spacer(minLength: 8)
-                if !previewModels.isEmpty {
-                    Label("\(previewModels.count)", systemImage: "square.stack.3d.up")
+                if let selectedNode {
+                    Label(
+                        catalogMode == .smartRoutes
+                            ? L("4 routes", "4 条路由")
+                            : L(
+                                "\(selectedNode.runtimeModelCatalog.count) models",
+                                "\(selectedNode.runtimeModelCatalog.count) 个模型"
+                            ),
+                        systemImage: "square.stack.3d.up"
+                    )
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .help(L("Models", "模型数"))
+                        .help(L("Visible Desktop model surface", "Desktop 可见模型"))
                     let contextCount = previewModels.filter(\.supports1M).count
                     if contextCount > 0 {
                         Text("\(contextCount) × 1M")
@@ -824,6 +717,7 @@ struct ClaudeDesktopIntegrationView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                modelManagerCompactButton
                 Button {
                     showModelModeHelp.toggle()
                 } label: {
@@ -839,8 +733,6 @@ struct ClaudeDesktopIntegrationView: View {
                     modelModeHelpPopover
                 }
             }
-
-            catalogModeSelector
 
             if catalogMode == .smartRoutes, let node = selectedNode {
                 let nodeDefaults = ClaudeAppResolvedModels(
@@ -870,16 +762,30 @@ struct ClaudeDesktopIntegrationView: View {
                         Task { await gateway.resetClaudeDesktopModelOverrides(nodeID: node.id) }
                     }
                 )
-            }
-
-            if previewModels.isEmpty {
-                Text(L("Choose a node with a configured Model Library.", "请选择已配置模型库的节点。"))
+            } else if catalogMode == .fullNodeCatalog, !previewModels.isEmpty {
+                ClaudeSearchableModelDirectory(
+                    items: previewModels.map { model in
+                        ClaudeModelCatalogItem(
+                            id: model.id,
+                            title: model.displayName,
+                            subtitle: model.displayName == model.upstreamModel ? nil : model.upstreamModel,
+                            badge: model.supports1M ? "1M" : nil,
+                            help: model.displayName == model.upstreamModel
+                                ? model.displayName
+                                : "\(model.displayName) → \(model.upstreamModel)",
+                            isDefault: model.upstreamModel == selectedNode?.defaultModel
+                        )
+                    },
+                    brand: Self.brand,
+                    title: L("Node model catalog", "节点模型目录")
+                )
+                .id(selectedNode?.id)
+            } else if previewModels.isEmpty {
+                Text(L("Choose a node with at least one available model.", "请选择至少包含一个可用模型的节点。"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
-            } else {
-                displayNamePreview
             }
 
             ClaudeEffortOwnershipRow(
@@ -890,22 +796,32 @@ struct ClaudeDesktopIntegrationView: View {
                     "请在 Desktop 的模型菜单中选择 Effort 与 Thinking"
                 )
             )
-
-            modelManagerButton
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
     }
 
-    private var catalogModeSelector: some View {
-        ClaudeModelModeSelector(
-            selection: catalogMode,
-            brand: Self.brand,
-            nodeModelsDetail: L("Real names · reload Desktop", "真实名称 · 重载 Desktop"),
-            isDisabled: gateway.isBusy || manager.isBusy,
-            onSelect: requestCatalogMode
-        )
+    private var modelManagerCompactButton: some View {
+        Button {
+            showModelManager = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(L("Model settings", "模型设置"))
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+            .foregroundStyle(Self.brand)
+            .padding(.horizontal, 9)
+            .frame(height: 29)
+            .background(Capsule().fill(Self.brand.opacity(0.085)))
+            .overlay(Capsule().stroke(Self.brand.opacity(0.22), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(selectedNode == nil)
+        .opacity(selectedNode == nil ? 0.5 : 1)
+        .help(L("Configure model capabilities", "配置模型能力"))
     }
 
     private func requestCatalogMode(_ mode: ClaudeDesktopCatalogMode) {
@@ -933,8 +849,8 @@ struct ClaudeDesktopIntegrationView: View {
                 symbol: "square.stack.3d.up",
                 title: L("Node models", "节点模型"),
                 detail: L(
-                    "Desktop shows the selected node's real model names. AIUsage reloads Desktop when the visible catalog changes.",
-                    "Desktop 显示所选节点的真实模型名称；可见目录变化时，AIUsage 会重载 Desktop。"
+                    "Desktop shows only the selected node's complete real model catalog. Switching the node automatically reloads Desktop.",
+                    "Desktop 仅显示当前节点的完整真实模型目录；切换节点后会自动重新加载 Desktop。"
                 )
             )
         }
@@ -958,182 +874,6 @@ struct ClaudeDesktopIntegrationView: View {
                 "Desktop reloads now and whenever its visible model list changes.",
                 "Desktop 现在会重载；以后可见模型列表变化时也会自动重载。"
             )
-    }
-
-    private var displayNamePreview: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 7) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Self.brand)
-                Group {
-                    if catalogMode == .smartRoutes {
-                        Text(L("Stable route → active model", "固定路由 → 当前模型"))
-                    } else {
-                        Text(L("Desktop model → selected node", "Desktop 模型 → 当前节点"))
-                    }
-                }
-                .font(.caption.weight(.semibold))
-                Spacer()
-            }
-
-            ClaudeModelCatalogGrid(
-                items: previewModels.map { model in
-                    ClaudeModelCatalogItem(
-                        id: model.id,
-                        title: model.displayName,
-                        subtitle: model.upstreamModel,
-                        badge: model.supports1M ? "1M" : nil,
-                        help: model.displayName == model.upstreamModel
-                            ? model.displayName
-                            : "\(model.displayName) → \(model.upstreamModel)",
-                        isDefault: catalogMode == .smartRoutes
-                            ? model.id == ClaudeDesktopProfileStore.defaultRouteID
-                            : model.upstreamModel == selectedNode?.defaultModel
-                    )
-                },
-                brand: Self.brand,
-                showAll: $showAllDesktopModels
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var modelManagerButton: some View {
-        Button {
-            showModelManager = true
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Self.brand)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Self.brand.opacity(isModelManagerHovered ? 0.16 : 0.11))
-                    )
-
-                Text(L("Model settings", "模型设置"))
-                    .font(.callout.weight(.semibold))
-
-                Spacer(minLength: 12)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isModelManagerHovered ? Self.brand : Color.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isModelManagerHovered ? Self.brand.opacity(0.055) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(
-                        isModelManagerHovered ? Self.brand.opacity(0.30) : Color.primary.opacity(0.07),
-                        lineWidth: 1
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(selectedNode == nil)
-        .opacity(selectedNode == nil ? 0.55 : 1)
-        .onHover { isModelManagerHovered = $0 }
-        .accessibilityHint(L(
-            "Shows the current Desktop catalog and model capabilities.",
-            "查看当前 Desktop 模型目录与模型能力。"
-        ))
-    }
-
-    private var desktopPortCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "number.square.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Self.brand)
-                    .frame(width: 34, height: 34)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Self.brand.opacity(0.11)))
-                Text(L("Desktop HTTPS port", "Desktop HTTPS 端口"))
-                    .font(.headline)
-                Spacer(minLength: 12)
-                Button {
-                    showConnectionHelp.toggle()
-                } label: {
-                    Image(systemName: "questionmark.circle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(L("Connection details", "接入说明"))
-                .popover(isPresented: $showConnectionHelp, arrowEdge: .top) {
-                    connectionHelpPopover
-                }
-            }
-
-            HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L("Port", "端口"))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    TextField("14403", text: $desktopPortDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.body.monospacedDigit())
-                        .multilineTextAlignment(.leading)
-                        .frame(width: 118)
-                        .focused($isPortFieldFocused)
-                        .disabled(manager.isConfigured || manager.isBusy)
-                        .onChange(of: desktopPortDraft) { _, newValue in
-                            let filtered = String(newValue.filter(\.isNumber).prefix(5))
-                            if filtered != newValue { desktopPortDraft = filtered }
-                            portSaveMessage = nil
-                            portSaveError = nil
-                        }
-                }
-
-                if manager.isConfigured {
-                    Label(L("Attached", "接入中"), systemImage: "lock.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Self.brand)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(Self.brand.opacity(0.10)))
-                        .padding(.bottom, 2)
-                }
-
-                Spacer(minLength: 4)
-
-                if !manager.isConfigured {
-                    Button(L("Restore default", "恢复默认")) {
-                        desktopPortDraft = String(GlobalProxyConfig.defaultClaudeDesktopHTTPSPort)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(manager.isBusy)
-
-                    Button(L("Save", "保存")) {
-                        saveDesktopPort()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Self.brand)
-                    .disabled(!canSaveDesktopPort)
-                }
-            }
-
-            if manager.isConfigured {
-                EmptyView()
-            } else if let portValidationMessage {
-                inlinePortMessage(symbol: "exclamationmark.triangle.fill", text: portValidationMessage, color: .orange)
-            } else if let portSaveError {
-                inlinePortMessage(symbol: "xmark.circle.fill", text: portSaveError, color: .red)
-            } else if let portSaveMessage {
-                inlinePortMessage(symbol: "checkmark.circle.fill", text: portSaveMessage, color: .green)
-            }
-        }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
     }
 
     private var connectionHelpPopover: some View {
@@ -1251,24 +991,8 @@ struct ClaudeDesktopIntegrationView: View {
         }
     }
 
-    private var noNodesCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "shippingbox").foregroundStyle(.orange)
-            Text(L(
-                "No Claude node is available. Add one in the Node tab first.",
-                "暂无可用的 Claude 节点，请先在 Node 页签添加。"
-            ))
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.08)))
-    }
-
     private func selectNode(_ nodeID: String) {
         selectedNodeID = nodeID
-        showAllDesktopModels = false
         if manager.isConfigured {
             Task { await gateway.switchActiveNode(to: nodeID) }
         }
@@ -1320,11 +1044,9 @@ private struct ClaudeDesktopModelManagerSheet: View {
     @State private var showHelp = false
 
     private var catalog: [ClaudeDesktopCatalogEntry] {
-        ClaudeDesktopProfileStore.catalog(
+        ClaudeDesktopProfileStore.realCatalog(
             for: node,
-            mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-            supports1M: enabled1M,
-            routes: gateway.config.effectiveClaudeDesktopModels(for: node)
+            supports1M: enabled1M
         )
     }
 
@@ -1365,9 +1087,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
                         .fill(ClaudeDesktopIntegrationView.brand.opacity(0.12))
                 )
             VStack(alignment: .leading, spacing: 4) {
-                Text(gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
-                    ? L("Desktop hot-switch tiers", "Desktop 热切换三档")
-                    : L("All node models", "节点全部模型"))
+                Text(L("Desktop model catalog", "Desktop 模型目录"))
                     .font(.title3.weight(.bold))
                 Text(node.name)
                     .font(.callout)
@@ -1486,9 +1206,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text(gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
-                 ? L("Hot switch", "热切换")
-                 : L("Node models", "节点模型"))
+            Text(L("Real node models", "节点真实模型"))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Spacer()
@@ -1503,15 +1221,10 @@ private struct ClaudeDesktopModelManagerSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L("Model settings", "模型设置"))
                 .font(.headline)
-            Text(gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
-                 ? L(
-                    "Three stable model IDs are remapped inside Gateway. Ordinary node switches stay live.",
-                    "三条固定模型 ID 在 Gateway 内完成映射，普通切换节点无需重启。"
-                 )
-                 : L(
-                    "Desktop shows this node's real model names. Visible catalog changes reload Desktop.",
-                    "Desktop 显示此节点的真实模型名称；可见目录变化时会重载 Desktop。"
-                 ))
+            Text(L(
+                "This list manages the node's real Desktop models and 1M capability. Application route mappings are configured on the main Desktop page.",
+                "此处管理节点在 Desktop 中可用的真实模型及 1M 能力；应用模型映射请在 Desktop 主页面设置。"
+            ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

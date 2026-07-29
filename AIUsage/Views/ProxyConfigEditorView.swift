@@ -1,5 +1,6 @@
-import SwiftUI
+import AppKit
 import QuotaBackend
+import SwiftUI
 
 // MARK: - Editor Tabs
 
@@ -29,23 +30,23 @@ private enum NodeEditorSection: String, CaseIterable, Identifiable {
     case identity
     case connection
     case models
-    case security
+    case pricing
 
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .identity: return L("Identity", "节点身份")
+        case .identity: return L("Basics", "基本信息")
         case .connection: return L("Connection", "连接")
-        case .models: return L("Models", "模型能力")
-        case .security: return L("Security", "安全")
+        case .models: return L("Models", "模型")
+        case .pricing: return L("Pricing", "模型费用")
         }
     }
     var symbol: String {
         switch self {
-        case .identity: return "fingerprint"
+        case .identity: return "slider.horizontal.3"
         case .connection: return "arrow.left.arrow.right"
         case .models: return "square.stack.3d.up"
-        case .security: return "lock.shield"
+        case .pricing: return "dollarsign.circle"
         }
     }
     var help: String {
@@ -53,11 +54,20 @@ private enum NodeEditorSection: String, CaseIterable, Identifiable {
         case .identity:
             return L("Choose the upstream API protocol and give this reusable node a recognizable name.", "选择上游 API 协议，并为可复用节点设置清晰名称。")
         case .connection:
-            return L("Every node owns one fixed local host and port. Code, Desktop and Science connect through their own gateways and share this endpoint.", "每个节点固定占用一个本地主机与端口；Code、Desktop、Science 通过各自网关共享该端点。")
+            return L(
+                "Set the node endpoint, upstream credentials and access key here. LAN clients must provide the same access key.",
+                "在这里设置节点端点、上游凭据与访问密钥；局域网设备也必须提供同一访问密钥。"
+            )
         case .models:
-            return L("The library lists exact upstream model IDs and prices. Product gateways resolve aliases before requests arrive here.", "模型库只保存真实上游模型 ID 与价格；模型别名由各应用网关在请求到达节点前解析。")
-        case .security:
-            return L("The client key protects access to this local node. Upstream credentials remain inside the node process.", "客户端密钥用于保护该本地节点；上游凭据始终留在节点进程内。")
+            return L(
+                "Sync exact model IDs from upstream, then choose the defaults offered to Code and Desktop. The node runtime does not remap aliases.",
+                "从上游同步真实模型名称，再设置提供给 Code 与 Desktop 的默认映射；节点运行时不会二次转换别名。"
+            )
+        case .pricing:
+            return L(
+                "Optional prices only affect usage-cost estimates. Blank prices do not block a model; public matches are reviewed before they are applied.",
+                "模型价格仅用于用量金额估算；留空不会影响模型使用，公开价格也会先预览再写入。"
+            )
         }
     }
 }
@@ -92,21 +102,24 @@ struct ProxyConfigEditorView: View {
     @State var isApplyingFinalJSONEdit = false
     @State private var selectedSection: NodeEditorSection = .identity
     @State private var helpSection: NodeEditorSection?
-    @State private var isModelLibraryPresented = false
+    @State private var showDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var deletionError: String?
+    @State private var copiedClientKey = false
 
     init(profile: NodeProfile? = nil) {
         if var profile {
-            // 旧档案迁移：库为空时用槽位价格播种，打开编辑器即看到完整模型库。
-            profile.metadata.proxy.seedModelLibraryIfEmpty()
+            profile.metadata.proxy.seedModelCatalogIfEmpty()
             _profile = State(initialValue: profile)
             _isNew = State(initialValue: false)
             _jsonText = State(initialValue: profile.settingsJSONString)
-            _pricingCurrency = State(initialValue: profile.metadata.proxy.modelLibrary?.first?.pricing.currency
-                ?? profile.metadata.proxy.modelMapping.bigModel.pricing.currency)
+            _pricingCurrency = State(
+                initialValue: profile.metadata.proxy.modelCatalog.pricingOverrides.values.first?.currency ?? .usd
+            )
         } else {
             var newProfile = NodeProfile.defaultProfile()
             newProfile.metadata.proxy.port = NodeProfileStore.shared.nextAvailablePort()
-            newProfile.metadata.proxy.seedModelLibraryIfEmpty()
+            newProfile.metadata.proxy.seedModelCatalogIfEmpty()
             _profile = State(initialValue: newProfile)
             _isNew = State(initialValue: true)
             _jsonText = State(initialValue: newProfile.settingsJSONString)
@@ -117,12 +130,13 @@ struct ProxyConfigEditorView: View {
     /// Legacy init wrapping a ProxyConfiguration for callers not yet migrated.
     init(config: ProxyConfiguration) {
         var p = NodeProfile.fromLegacyConfiguration(config)
-        p.metadata.proxy.seedModelLibraryIfEmpty()
+        p.metadata.proxy.seedModelCatalogIfEmpty()
         _profile = State(initialValue: p)
         _isNew = State(initialValue: false)
         _jsonText = State(initialValue: p.settingsJSONString)
-        _pricingCurrency = State(initialValue: p.metadata.proxy.modelLibrary?.first?.pricing.currency
-            ?? config.modelMapping.bigModel.pricing.currency)
+        _pricingCurrency = State(
+            initialValue: p.metadata.proxy.modelCatalog.pricingOverrides.values.first?.currency ?? .usd
+        )
     }
 
     var body: some View {
@@ -135,9 +149,32 @@ struct ProxyConfigEditorView: View {
             Divider()
             footerBar
         }
-        .frame(width: 780, height: 620)
-        .sheet(isPresented: $isModelLibraryPresented) {
-            modelLibrarySheet
+        .frame(width: 980, height: 660)
+        .confirmationDialog(
+            L("Delete “\(profile.metadata.name)”?", "删除「\(profile.metadata.name)」？"),
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L("Delete Node", "删除节点"), role: .destructive) {
+                Task { await deleteNode() }
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(deleteConfirmationMessage)
+        }
+        .alert(
+            L("Could Not Delete Node", "无法删除节点"),
+            isPresented: Binding(
+                get: { deletionError != nil },
+                set: { if !$0 { deletionError = nil } }
+            )
+        ) {
+            Button(L("OK", "好")) { deletionError = nil }
+        } message: {
+            Text(deletionError ?? "")
+        }
+        .onChange(of: modelFetch.availableModels) { _, models in
+            mergeFetchedModelsIntoCatalog(models)
         }
     }
 
@@ -149,7 +186,7 @@ struct ProxyConfigEditorView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(isNew ? L("New Node", "新建节点") : L("Edit Node", "编辑节点"))
                         .font(.title2.weight(.bold))
-                    Text(L("A reusable protocol endpoint for every Claude product", "供所有 Claude 应用复用的协议端点"))
+                    Text(L("Manage this node’s connection, access, and available models", "管理此节点的连接、访问与可用模型"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -204,12 +241,22 @@ struct ProxyConfigEditorView: View {
     private var footerBar: some View {
         HStack {
             if !isNew {
-                Button(L("Delete", "删除"), role: .destructive) {
-                    Task {
-                        await viewModel.deleteConfiguration(profile.id)
-                        dismiss()
+                Button(role: .destructive) {
+                    if let deletionBlockReason {
+                        deletionError = deletionBlockReason
+                    } else {
+                        showDeleteConfirmation = true
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isDeleting {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(L("Delete", "删除"))
                     }
                 }
+                .disabled(isDeleting)
+                .help(deletionBlockReason ?? L("Delete this node", "删除此节点"))
             }
             Spacer()
             Button(L("Cancel", "取消")) { dismiss() }
@@ -243,7 +290,7 @@ struct ProxyConfigEditorView: View {
                     sectionContent
                 }
                 .padding(18)
-                .frame(maxWidth: 560, alignment: .leading)
+                .frame(maxWidth: 790, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -254,7 +301,7 @@ struct ProxyConfigEditorView: View {
             ForEach(NodeEditorSection.allCases) { section in
                 let selected = selectedSection == section
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) { selectedSection = section }
+                    selectedSection = section
                 } label: {
                     HStack(spacing: 9) {
                         Image(systemName: section.symbol).frame(width: 18)
@@ -263,8 +310,9 @@ struct ProxyConfigEditorView: View {
                     }
                     .font(.callout.weight(selected ? .semibold : .medium))
                     .foregroundStyle(selected ? Color.teal : Color.secondary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .contentShape(Rectangle())
                     .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Color.teal.opacity(0.10) : .clear))
                 }
                 .buttonStyle(.plain)
@@ -288,10 +336,11 @@ struct ProxyConfigEditorView: View {
         case .connection:
             networkSection
             upstreamCredentialsSection
+            accessProtectionSection
         case .models:
             modelMappingSection
-        case .security:
-            securitySection
+        case .pricing:
+            pricingRulesSection
         }
     }
 
@@ -497,31 +546,48 @@ struct ProxyConfigEditorView: View {
 
     private var networkSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L("Fixed Node Endpoint", "固定节点端点"))
+            Text(L("Node Endpoint", "节点地址"))
                 .font(.headline.weight(.bold))
 
-            HStack(spacing: 12) {
+            HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(L("Host", "主机")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(L("Listen Address", "监听地址")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     TextField("127.0.0.1", text: $profile.metadata.proxy.host)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 210)
+                        .frame(width: 190)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L("Port", "端口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     TextField("8080", value: $profile.metadata.proxy.port, format: .number.grouping(.never))
                         .textFieldStyle(.roundedBorder).frame(width: 100)
                 }
+                Spacer(minLength: 10)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L("Network", "访问范围"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Toggle(
+                        L("LAN access", "局域网访问"),
+                        isOn: $profile.metadata.proxy.allowLAN
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(.teal)
+                }
             }
-
-            Toggle(L("Allow LAN Access (0.0.0.0)", "允许局域网访问 (0.0.0.0)"), isOn: $profile.metadata.proxy.allowLAN)
-                .font(.caption.weight(.medium))
+            .onChange(of: profile.metadata.proxy.allowLAN) { _, enabled in
+                if enabled, usesDefaultClientKey {
+                    generateClientKey()
+                }
+            }
 
             if profile.metadata.proxy.allowLAN {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(L("Warning: This will expose the proxy to your local network",
-                           "警告：这将把代理暴露到你的局域网"))
+                    Text(L(
+                        "Devices on your local network can reach this port, but must still provide the node access key.",
+                        "同一局域网内的设备可以连接此端口，但仍必须提供节点访问密钥。"
+                    ))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 .padding(8)
@@ -570,162 +636,217 @@ struct ProxyConfigEditorView: View {
 
     private var modelMappingSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(L("Exact Model Catalog", "真实模型目录"))
-                .font(.headline.weight(.bold))
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L("Default Upstream Model", "默认上游模型")).font(.subheadline.weight(.semibold))
-                HStack(spacing: 6) {
-                    modelTextField(text: $profile.metadata.proxy.defaultModel,
-                                   placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-sonnet-4-6")
-                    ModelLibrarySlotPicker(selection: $profile.metadata.proxy.defaultModel, library: currentModelLibrary)
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L("Capability Defaults", "能力默认值")).font(.subheadline.weight(.semibold))
-                modelSlotRow(label: "Opus", binding: $profile.metadata.proxy.modelMapping.bigModel.name,
-                             placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-opus-4-6")
-                modelSlotRow(label: "Sonnet", binding: $profile.metadata.proxy.modelMapping.middleModel.name,
-                             placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.4-mini" : "claude-sonnet-4-6")
-                modelSlotRow(label: "Haiku", binding: $profile.metadata.proxy.modelMapping.smallModel.name,
-                             placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-4o-mini" : "claude-haiku-4-5")
-            }
-
-            Divider()
-            modelLibrarySummary
-
-            if profile.metadata.nodeType == .openaiProxy {
-                Divider()
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L("Max Output Tokens", "最大输出 Token")).font(.subheadline.weight(.semibold))
-                    HStack(spacing: 8) {
-                        TextField("0", value: $profile.metadata.proxy.maxOutputTokens, format: .number)
-                            .textFieldStyle(.roundedBorder).frame(width: 120)
-                        Text(L("0 = unlimited", "0 = 不限制")).font(.caption2).foregroundStyle(.tertiary)
-                    }
-                }
-            }
+            modelDiscoveryPanel
+            applicationModelDefaults
+            maximumOutputSection
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
     }
 
-    private func modelSlotRow(label: String, binding: Binding<String>, placeholder: String) -> some View {
-        HStack(spacing: 10) {
-            Text(label)
-                .font(.system(.caption, design: .monospaced).weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 52, alignment: .trailing)
-            modelTextField(text: binding, placeholder: placeholder)
-            ModelLibrarySlotPicker(selection: binding, library: currentModelLibrary)
+    private var modelDiscoveryPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.teal)
+                    .frame(width: 34, height: 34)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(Color.teal.opacity(0.10)))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 7) {
+                        Text(L("Available Models", "可用模型"))
+                            .font(.subheadline.weight(.semibold))
+                        Text("\(currentModelCatalog.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.teal)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.teal.opacity(0.10)))
+                    }
+                    Text(L(
+                        "Sync exact names from \(upstreamPreviewLabel). Pricing is optional.",
+                        "从 \(upstreamPreviewLabel) 同步真实名称；无需设置价格即可使用。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+
+                Spacer(minLength: 10)
+                Button {
+                    Task { await fetchModelsFromUpstream() }
+                } label: {
+                    HStack(spacing: 5) {
+                        if modelFetch.isFetching {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(L("Sync", "同步"))
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canFetchModels)
+            }
+
+            if let error = modelFetch.errorMessage {
+                Label(error, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !modelFetch.availableModels.isEmpty {
+                Label(
+                    L(
+                        "Synced \(modelFetch.availableModels.count) models from upstream",
+                        "已从上游同步 \(modelFetch.availableModels.count) 个模型"
+                    ),
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption2)
+                .foregroundStyle(.green)
+            }
         }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 11).fill(Color.teal.opacity(0.055)))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color.teal.opacity(0.14), lineWidth: 1))
     }
 
-    private func modelTextField(text: Binding<String>, placeholder: String) -> some View {
-        ModelSuggestionField(text: text, placeholder: placeholder, state: modelFetch)
-            .frame(width: 380)
-    }
-
-    /// 槽位下拉用的当前模型库（已过滤空名）。
-    var currentModelLibrary: [ProxyConfiguration.MappedModel] {
-        (profile.metadata.proxy.modelLibrary ?? []).filter { !$0.name.isEmpty }
-    }
-
-    private var modelLibrarySummary: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "books.vertical.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.teal)
-                .frame(width: 36, height: 36)
-                .background(RoundedRectangle(cornerRadius: 9).fill(Color.teal.opacity(0.10)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("Model Library & Pricing", "模型库与定价"))
+    private var applicationModelDefaults: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L("App Default Mapping", "应用默认映射"))
                     .font(.subheadline.weight(.semibold))
                 Text(L(
-                    "\(currentModelLibrary.count) exact models · opens in a focused editor",
-                    "\(currentModelLibrary.count) 个真实模型 · 在独立编辑器中管理"
+                    "Initial choices for Code and Desktop. App-level overrides do not change this node.",
+                    "作为 Code 与 Desktop 的初始选择；应用内覆盖不会修改此节点。"
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            Spacer()
-            Button(L("Manage Library…", "管理模型库…")) {
-                isModelLibraryPresented = true
-            }
-            .buttonStyle(.bordered)
+
+            modelSlotRow(
+                label: L("Default", "默认"),
+                symbol: "sparkles",
+                tint: .indigo,
+                binding: $profile.metadata.proxy.defaultModel,
+                placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-sonnet-4-6"
+            )
+            modelSlotRow(
+                label: "Opus",
+                symbol: "diamond.fill",
+                tint: .purple,
+                binding: $profile.metadata.proxy.modelMapping.bigModel.name,
+                placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-opus-4-6"
+            )
+            modelSlotRow(
+                label: "Sonnet",
+                symbol: "waveform.path",
+                tint: .orange,
+                binding: $profile.metadata.proxy.modelMapping.middleModel.name,
+                placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.4-mini" : "claude-sonnet-4-6"
+            )
+            modelSlotRow(
+                label: "Haiku",
+                symbol: "bolt.fill",
+                tint: .teal,
+                binding: $profile.metadata.proxy.modelMapping.smallModel.name,
+                placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-4o-mini" : "claude-haiku-4-5"
+            )
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Color.primary.opacity(0.035)))
     }
 
-    private var modelLibrarySheet: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(L("Model Library & Pricing", "模型库与定价"))
-                        .font(.title3.weight(.bold))
-                    Text(L(
-                        "Exact upstream identities used by every product gateway",
-                        "供所有应用网关使用的真实上游模型"
-                    ))
-                    .font(.caption)
+    private func modelSlotRow(
+        label: String,
+        symbol: String,
+        tint: Color,
+        binding: Binding<String>,
+        placeholder: String
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(tint.opacity(0.11)))
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .frame(width: 50, alignment: .leading)
+            modelTextField(text: binding, placeholder: placeholder)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 42)
+        .background(RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(tint.opacity(0.11), lineWidth: 1))
+    }
+
+    private func modelTextField(text: Binding<String>, placeholder: String) -> some View {
+        ModelSuggestionField(
+            text: text,
+            placeholder: placeholder,
+            state: modelFetch,
+            catalogModels: currentModelCatalog
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 当前节点持久化的真实模型目录（价格允许全部留空）。
+    var currentModelCatalog: [String] {
+        profile.metadata.proxy.modelCatalog.models.filter { !$0.isEmpty }
+    }
+
+    @ViewBuilder
+    private var maximumOutputSection: some View {
+        if profile.metadata.nodeType == .openaiProxy {
+            HStack(spacing: 12) {
+                Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Maximum Output", "最大输出 Token"))
+                        .font(.caption.weight(.semibold))
+                    Text(L("0 keeps the upstream limit", "0 表示沿用上游限制"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(L("Done", "完成")) { isModelLibraryPresented = false }
-                    .keyboardShortcut(.defaultAction)
+                TextField(
+                    "0",
+                    value: $profile.metadata.proxy.maxOutputTokens,
+                    format: .number.grouping(.never)
+                )
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 110)
             }
-            .padding(18)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    modelLibraryFetchPanel
-                    modelLibrarySection
-                }
-                .padding(16)
-            }
+            .padding(11)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.03)))
         }
-        .frame(width: 760, height: 560)
     }
 
-    private var modelLibraryFetchPanel: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.teal)
-                .frame(width: 34, height: 34)
-                .background(RoundedRectangle(cornerRadius: 9).fill(Color.teal.opacity(0.10)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("Import from upstream", "从上游获取模型"))
-                    .font(.subheadline.weight(.semibold))
-                Text(upstreamPreviewLabel)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 10)
-            modelLibraryFetchControl
-        }
-        .padding(11)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Color.primary.opacity(0.035)))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    private var canFetchModels: Bool {
+        let baseURL = profile.metadata.nodeType == .anthropicDirect
+            ? profile.metadata.proxy.anthropicBaseURL
+            : profile.metadata.proxy.normalizedUpstreamBaseURL
+        let apiKey = profile.metadata.nodeType == .anthropicDirect
+            ? profile.metadata.proxy.anthropicAPIKey
+            : profile.metadata.proxy.upstreamAPIKey
+        return !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !modelFetch.isFetching
     }
 
-    @ViewBuilder private var modelLibraryFetchControl: some View {
+    private func fetchModelsFromUpstream() async {
         if profile.metadata.nodeType == .anthropicDirect {
-            ModelFetchControls(
-                state: modelFetch,
+            await modelFetch.fetch(
                 baseURL: profile.metadata.proxy.anthropicBaseURL,
                 apiKey: profile.metadata.proxy.anthropicAPIKey,
-                style: .anthropic,
-                requiresAPIKey: false
+                style: .anthropic
             )
         } else {
-            ModelFetchControls(
-                state: modelFetch,
+            await modelFetch.fetch(
                 baseURL: profile.metadata.proxy.normalizedUpstreamBaseURL,
                 apiKey: profile.metadata.proxy.upstreamAPIKey,
                 style: .openAICompatible
@@ -737,39 +858,98 @@ struct ProxyConfigEditorView: View {
 
     @State var pricingCurrency: ProxyConfiguration.PricingCurrency = .usd
 
-    /// 模型库与定价（共享组件）；币种切换时同步槽位的遗留价格币种，保持回退路径一致。
-    var modelLibrarySection: some View {
-        ProxyModelLibraryEditor(
-            library: Binding(
-                get: { profile.metadata.proxy.modelLibrary ?? [] },
-                set: { profile.metadata.proxy.modelLibrary = $0.isEmpty ? nil : $0 }
-            ),
+    var pricingRulesSection: some View {
+        ProxyPricingRulesEditor(
+            catalog: $profile.metadata.proxy.modelCatalog,
             currency: $pricingCurrency,
-            modelFetch: modelFetch
+            upstreamBaseURL: profile.metadata.nodeType == .anthropicDirect
+                ? profile.metadata.proxy.anthropicBaseURL
+                : profile.metadata.proxy.normalizedUpstreamBaseURL
         )
-        .onChange(of: pricingCurrency) { _, newCurrency in
-            profile.metadata.proxy.modelMapping.bigModel.pricing.currency = newCurrency
-            profile.metadata.proxy.modelMapping.middleModel.pricing.currency = newCurrency
-            profile.metadata.proxy.modelMapping.smallModel.pricing.currency = newCurrency
-        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
     }
 
-    // MARK: - Security Section (OpenAI Proxy)
+    // MARK: - Access Protection
 
-    private var securitySection: some View {
+    private var accessProtectionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L("Local Access", "本地访问")).font(.headline.weight(.bold))
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("Client API Key", "客户端 API Key"))
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                SecureKeyField(L("Empty uses proxy-key", "留空则使用 proxy-key"), text: $profile.metadata.proxy.expectedClientKey)
-                    .frame(width: 400)
+            HStack {
+                Text(L("Access Protection", "访问保护"))
+                    .font(.headline.weight(.bold))
+                Spacer()
+                if copiedClientKey {
+                    Label(L("Copied", "已复制"), systemImage: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                }
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Node Access Key", "节点访问密钥"))
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    SecureKeyField(
+                        L("Empty uses the local default key", "留空则使用本机默认密钥"),
+                        text: $profile.metadata.proxy.expectedClientKey
+                    )
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        copyClientKey()
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.bordered)
+                    .help(L("Copy access key", "复制访问密钥"))
+
+                    Button {
+                        generateClientKey()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.bordered)
+                    .help(L("Generate a new access key", "生成新的访问密钥"))
+                }
+            }
+
             HStack(spacing: 6) {
-                Image(systemName: "lock.shield.fill").foregroundStyle(.green)
-                Text(L("Product gateways use this key to authenticate to the node.",
-                       "各应用网关使用此密钥访问该节点。"))
+                Image(systemName: "lock.shield.fill")
+                    .foregroundStyle(profile.metadata.proxy.allowLAN ? .orange : .green)
+                Text(profile.metadata.proxy.allowLAN
+                    ? L(
+                        "AIUsage apps and LAN clients must provide this key when connecting to the node.",
+                        "AIUsage 应用与局域网客户端连接节点时都必须提供此密钥。"
+                    )
+                    : L(
+                        "Code, Desktop and Science use this key automatically. It is never sent to the upstream provider.",
+                        "Code、Desktop 与 Science 会自动使用此密钥；它不会发送给上游服务。"
+                    ))
                     .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            if profile.metadata.proxy.allowLAN, usesDefaultClientKey {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(L(
+                        "Generate a dedicated key before exposing this node to your local network.",
+                        "局域网访问不能使用默认密钥，请先生成独立访问密钥。"
+                    ))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button(L("Generate", "生成")) { generateClientKey() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                .padding(9)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.orange.opacity(0.09)))
             }
         }
         .padding(16)
@@ -781,15 +961,17 @@ struct ProxyConfigEditorView: View {
     private var isValid: Bool {
         let nameValid = !profile.metadata.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let proxy = profile.metadata.proxy
+        let accessValid = !proxy.allowLAN || !usesDefaultClientKey
 
         switch profile.metadata.nodeType {
         case .anthropicDirect:
             return nameValid && !proxy.anthropicBaseURL.isEmpty && !proxy.anthropicAPIKey.isEmpty
-                && !proxy.host.isEmpty && proxy.port > 0 && proxy.port < 65536
+                && !proxy.host.isEmpty && proxy.port > 0 && proxy.port < 65536 && accessValid
         case .openaiProxy:
             return nameValid &&
                 !proxy.host.isEmpty &&
                 proxy.port > 0 && proxy.port < 65536 &&
+                accessValid &&
                 !proxy.normalizedUpstreamBaseURL.isEmpty &&
                 !proxy.upstreamAPIKey.isEmpty &&
                 !proxy.modelMapping.bigModel.name.isEmpty &&
@@ -800,9 +982,75 @@ struct ProxyConfigEditorView: View {
             return nameValid &&
                 !proxy.host.isEmpty &&
                 proxy.port > 0 && proxy.port < 65536 &&
+                accessValid &&
                 !proxy.normalizedUpstreamBaseURL.isEmpty &&
                 !proxy.upstreamAPIKey.isEmpty &&
                 !proxy.modelMapping.bigModel.name.isEmpty
+        }
+    }
+
+    private var usesDefaultClientKey: Bool {
+        let key = profile.metadata.proxy.expectedClientKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty || key == "proxy-key"
+    }
+
+    private var deletionBlockReason: String? {
+        viewModel.managedRuntimeDeletionBlockReason(for: profile.id)
+    }
+
+    private var deleteConfirmationMessage: String {
+        var message = L(
+            "This permanently removes the node configuration and closes its local endpoint. Archived usage remains available. This action cannot be undone.",
+            "这会永久删除节点配置并关闭其本地端点；历史用量归档仍会保留。此操作无法撤销。"
+        )
+        if linkedProviderName != nil {
+            message += L(
+                " The source API provider will not be deleted.",
+                " 来源 API 提供商不会被删除。"
+            )
+        }
+        return message
+    }
+
+    private func generateClientKey() {
+        let first = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let second = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        profile.metadata.proxy.expectedClientKey = first + second
+        copiedClientKey = false
+    }
+
+    private func copyClientKey() {
+        let key = profile.metadata.proxy.expectedClientKey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let effective = key.isEmpty ? "proxy-key" : key
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(effective, forType: .string)
+        copiedClientKey = true
+    }
+
+    private func mergeFetchedModelsIntoCatalog(_ models: [String]) {
+        guard !models.isEmpty else { return }
+        profile.metadata.proxy.modelCatalog.mergeModels(models)
+    }
+
+    private func deleteNode() async {
+        if let deletionBlockReason {
+            deletionError = deletionBlockReason
+            return
+        }
+
+        isDeleting = true
+        viewModel.operationErrorMessage = nil
+        await viewModel.deleteConfiguration(profile.id)
+        isDeleting = false
+
+        if viewModel.configurations.contains(where: { $0.id == profile.id }) {
+            deletionError = viewModel.operationErrorMessage ?? L(
+                "The node was not deleted. Try again after disconnecting its apps.",
+                "节点未被删除。请断开正在使用它的应用后重试。"
+            )
+        } else {
+            dismiss()
         }
     }
 
@@ -833,7 +1081,6 @@ struct ProxyConfigEditorView: View {
         // it to the simpler HTTP-only local-node contract used by Code.
         profile.metadata.proxy.enableHTTPS = false
         profile.metadata.proxy.httpsPort = nil
-        profile.metadata.proxy.syncSlotPricingFromLibrary()
         // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
         profile = APIProviderDistributor.shared.stampOverrides(profile)
 

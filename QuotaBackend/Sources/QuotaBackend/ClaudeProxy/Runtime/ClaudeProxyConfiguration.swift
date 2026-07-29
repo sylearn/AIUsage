@@ -162,14 +162,14 @@ public struct ClaudeProxyConfiguration: Sendable {
             // returning it as a literal upstream model would couple Desktop to
             // one node and defeat Gateway hot switching.
             if mapDesktopTierRoutes,
-               ScienceModelProtocolAdapter.isStableDesktopTierRoute(resolved) {
+               ScienceModelProtocolAdapter.isStableProductTierRoute(resolved) {
                 return mapTierRouteToUpstream(resolved)
             }
             return resolved
         }
         if preferExactCatalogModels, availableModels.contains(requestModel) {
             if mapDesktopTierRoutes,
-               ScienceModelProtocolAdapter.isStableDesktopTierRoute(requestModel) {
+               ScienceModelProtocolAdapter.isStableProductTierRoute(requestModel) {
                 return mapTierRouteToUpstream(requestModel)
             }
             return requestModel
@@ -179,7 +179,7 @@ public struct ClaudeProxyConfiguration: Sendable {
 
     private func mapTierRouteToUpstream(_ requestModel: String) -> String {
         let normalized = requestModel.lowercased()
-        if normalized == ScienceModelProtocolAdapter.desktopDefaultRouteID {
+        if normalized == ScienceModelProtocolAdapter.defaultRouteID {
             return defaultModel ?? middleModel
         } else if normalized.contains("opus") {
             return bigModel

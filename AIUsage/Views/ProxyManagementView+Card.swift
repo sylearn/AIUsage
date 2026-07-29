@@ -139,11 +139,11 @@ struct ConfigurationCardView: View, Equatable {
             : L("Copy Claude Code Launch Command", "复制 Claude Code 启动命令")
     }
 
-    // MARK: - Model Quick Switch（模型库多于一个模型时提供）
+    // MARK: - Model Quick Switch（模型目录多于一个模型时提供）
 
-    /// 模型库中的可切换模型（去空名）。
+    /// 模型目录中的可切换模型（去空名）。
     private var libraryModels: [String] {
-        config.modelLibrary.map(\.name).filter { !$0.isEmpty }
+        config.modelCatalog.models.filter { !$0.isEmpty }
     }
 
     /// 当前生效模型：Codex = config.toml 的 model；Claude 家族 = settings.json 的 model。
@@ -674,7 +674,7 @@ struct ConfigurationCardView: View, Equatable {
         .font(.caption)
     }
 
-    /// 默认模型行：模型库多于一个模型时内联单选切换（保存即生效，激活中节点自动滚动重载）。
+    /// 默认模型行：模型目录多于一个模型时内联单选切换（保存即生效，激活中节点自动滚动重载）。
     @ViewBuilder
     private var defaultModelRow: some View {
         if libraryModels.count > 1 {

@@ -175,8 +175,8 @@ extension ProxyManagementView {
 
     // MARK: - Model Quick Switch
 
-    /// 卡片上的默认模型快速切换：从模型库点选 → 写入 profile 并走滚动重载
-    /// （激活中节点自动断开→保存→重新接入；定价由模型库按新模型名解析，无需重填）。
+    /// 卡片上的默认模型快速切换：从模型目录点选 → 写入 profile 并走滚动重载。
+    /// 激活中节点自动断开→保存→重新接入；费用规则按真实模型名独立匹配。
     func switchDefaultModel(_ config: ProxyConfiguration, to model: String) {
         guard var profile = viewModel.profileStore.profile(for: config.id) else { return }
         if profile.metadata.nodeType.isCodex {
@@ -184,7 +184,7 @@ extension ProxyManagementView {
             profile.metadata.proxy.modelMapping.bigModel.name = model
         }
         profile.metadata.proxy.defaultModel = model
-        profile.metadata.proxy.syncSlotPricingFromLibrary()
+        profile.metadata.proxy.modelCatalog.mergeModels([model])
         profile.syncEnvFromProxy()
         Task { await viewModel.updateProfile(profile) }
     }

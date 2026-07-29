@@ -172,7 +172,7 @@ struct APIProvider: Identifiable, Codable, Equatable {
     var baseURL: String
     var apiKey: String
     var format: APIFormat
-    /// 模型库（模型名 + 独立定价，复用 Claude/Codex 的 MappedModel 以共用定价编辑器）。
+    /// 提供商模型清单及其默认价格；分发到节点后，模型目录与节点费用规则彼此独立。
     var models: [ProxyConfiguration.MappedModel]
     /// 顶层默认模型（应在 models 中）。
     var defaultModel: String

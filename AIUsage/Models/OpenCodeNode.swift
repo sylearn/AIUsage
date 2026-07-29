@@ -65,6 +65,8 @@ struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
     var priceOutputPerMillion: Double
     var priceCacheReadPerMillion: Double
     var priceCacheWritePerMillion: Double
+    /// 价格来源只用于编辑器说明，不写入 opencode.json。
+    var pricingSource: ProxyConfiguration.ModelPricing.Source?
     /// 每模型输入/输出模态（空 = 不写 modalities，由 OpenCode 取模型默认）。
     var inputModalities: [OpenCodeModality]
     var outputModalities: [OpenCodeModality]
@@ -75,6 +77,7 @@ struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
         priceOutputPerMillion: Double = 0,
         priceCacheReadPerMillion: Double = 0,
         priceCacheWritePerMillion: Double = 0,
+        pricingSource: ProxyConfiguration.ModelPricing.Source? = nil,
         inputModalities: [OpenCodeModality] = [],
         outputModalities: [OpenCodeModality] = []
     ) {
@@ -83,6 +86,7 @@ struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
         self.priceOutputPerMillion = priceOutputPerMillion
         self.priceCacheReadPerMillion = priceCacheReadPerMillion
         self.priceCacheWritePerMillion = priceCacheWritePerMillion
+        self.pricingSource = pricingSource
         self.inputModalities = inputModalities
         self.outputModalities = outputModalities
     }
@@ -93,6 +97,7 @@ struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
         case priceOutputPerMillion
         case priceCacheReadPerMillion
         case priceCacheWritePerMillion
+        case pricingSource
         case inputModalities
         case outputModalities
     }
@@ -105,6 +110,10 @@ struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
         priceOutputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceOutputPerMillion) ?? 0
         priceCacheReadPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheReadPerMillion) ?? 0
         priceCacheWritePerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheWritePerMillion) ?? 0
+        pricingSource = try c.decodeIfPresent(
+            ProxyConfiguration.ModelPricing.Source.self,
+            forKey: .pricingSource
+        )
         inputModalities = try c.decodeIfPresent([OpenCodeModality].self, forKey: .inputModalities) ?? []
         outputModalities = try c.decodeIfPresent([OpenCodeModality].self, forKey: .outputModalities) ?? []
     }

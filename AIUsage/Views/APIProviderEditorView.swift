@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - API Provider Editor
 // 新建/编辑「API 提供商」主配置的 sheet：名称 / 格式 / Base URL / API Key /
-// 模型库与定价（复用 ProxyModelLibraryEditor）/ 默认模型 / 共享高级参数 + 「分发到」勾选。
+// 提供商模型与默认定价 / 默认模型 / 共享高级参数 + 「分发到」勾选。
 // 保存交由调用方（APIProviderListView）落库并触发分发/同步。
 
 struct APIProviderEditorView: View {
@@ -222,7 +222,12 @@ struct APIProviderEditorView: View {
                 requiresAPIKey: false
             )
 
-            ProxyModelLibraryEditor(library: $library, currency: $currency, modelFetch: modelFetch)
+            ProviderModelLibraryEditor(
+                library: $library,
+                currency: $currency,
+                modelFetch: modelFetch,
+                upstreamBaseURL: draft.baseURL
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 fieldLabel(L("Default Model", "默认模型"), required: false)
