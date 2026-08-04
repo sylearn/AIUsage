@@ -26,10 +26,13 @@
 
 <p align="center">
   <sup>赞助商</sup><br>
-  <a href="https://sucloud.vip">
-    <img src="docs/images/sucloud-logo.png" alt="Sucloud" width="180">
+  <a href="https://api-models.com">
+    <img src="docs/images/api-models-logo-light.png#gh-light-mode-only" alt="API Models" width="180">
+  </a>
+  <a href="https://api-models.com">
+    <img src="docs/images/api-models-logo-dark.png#gh-dark-mode-only" alt="API Models" width="180">
   </a><br>
-  <sub>500+ AI 模型 · 文本/图像/视频/音频全模态覆盖 · 顶级模型全接入 · 按量计费</sub>
+  <sub>统一 AI API · 低价按量计费 · 独立状态监控 · 支付宝与微信支付</sub>
 </p>
 
 <p align="center">
@@ -266,21 +269,25 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 ## 赞助商
 
 <p align="center">
-  <a href="https://sucloud.vip">
-    <img src="docs/images/sucloud-logo.png" alt="Sucloud" width="180">
+  <a href="https://api-models.com">
+    <img src="docs/images/api-models-logo-light.png#gh-light-mode-only" alt="API Models" width="180">
+  </a>
+  <a href="https://api-models.com">
+    <img src="docs/images/api-models-logo-dark.png#gh-dark-mode-only" alt="API Models" width="180">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — 为国内开发者提供稳定高效的 AI 生产力基座。<br>
-  500+ 模型全模态覆盖（文本/图像/视频/音频），Claude、GPT、Gemini 等顶级模型全部接入。<br>
-  人民币充值，无需海外卡，0.7¥ = $1 超高性价比。
+  <a href="https://api-models.com"><strong>API Models</strong></a> —— 面向开发者的高性价比统一 AI 模型 API。<br>
+  一套账户接入 OpenAI 兼容、Anthropic Messages 与 Gemini 接口，并提供实用接入文档和独立状态监控。<br>
+  低价按量计费，支持支付宝、微信等常用充值方式。
 </p>
 
 <p align="center">
-  <img alt="模型" src="https://img.shields.io/badge/500%2B%20模型-全模态覆盖-6366f1?style=flat-square">
-  <img alt="费率" src="https://img.shields.io/badge/0.7%C2%A5%20%3D%20%241-按量计费-22c55e?style=flat-square">
-  <img alt="福利" src="https://img.shields.io/badge/%240.2-注册即送-f59e0b?style=flat-square">
+  <img alt="协议" src="https://img.shields.io/badge/API-OpenAI%20%C2%B7%20Anthropic%20%C2%B7%20Gemini-6366f1?style=flat-square">
+  <img alt="价格" src="https://img.shields.io/badge/%E4%BB%B7%E6%A0%BC-%E4%BD%8E%E4%BB%B7%E6%8C%89%E9%87%8F%E8%AE%A1%E8%B4%B9-22c55e?style=flat-square">
+  <img alt="可用性" src="https://img.shields.io/badge/%E5%8F%AF%E7%94%A8%E6%80%A7-%E7%8B%AC%E7%AB%8B%E7%8A%B6%E6%80%81%E7%9B%91%E6%8E%A7-0ea5e9?style=flat-square">
+  <img alt="支付" src="https://img.shields.io/badge/%E6%94%AF%E4%BB%98-%E6%94%AF%E4%BB%98%E5%AE%9D%20%C2%B7%20%E5%BE%AE%E4%BF%A1-f59e0b?style=flat-square">
 </p>
 
 ## 支持作者
