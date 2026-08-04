@@ -27,12 +27,9 @@
 <p align="center">
   <sup>Sponsored by</sup><br>
   <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-light.png#gh-light-mode-only" alt="API Models" width="180">
-  </a>
-  <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-dark.png#gh-dark-mode-only" alt="API Models" width="180">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="180">
   </a><br>
-  <sub>Unified AI APIs · Cost-effective pay-as-you-go · Independently monitored · Alipay & WeChat Pay</sub>
+  <sub>Unified AI APIs · Cost-effective pay-as-you-go · Independently monitored · Alipay & Crypto Pay</sub>
 </p>
 
 <p align="center">
@@ -270,24 +267,21 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 
 <p align="center">
   <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-light.png#gh-light-mode-only" alt="API Models" width="180">
-  </a>
-  <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-dark.png#gh-dark-mode-only" alt="API Models" width="180">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="180">
   </a>
 </p>
 
 <p align="center">
   <a href="https://api-models.com"><strong>API Models</strong></a> — cost-effective access to leading AI models through one API service.<br>
   OpenAI-compatible, Anthropic Messages and Gemini endpoints, with practical integration guides and independent uptime monitoring.<br>
-  Low-cost pay-as-you-go pricing with Alipay and WeChat Pay top-ups.
+  Low-cost pay-as-you-go pricing with Alipay and Crypto Pay top-ups.
 </p>
 
 <p align="center">
   <img alt="Protocols" src="https://img.shields.io/badge/API-OpenAI%20%C2%B7%20Anthropic%20%C2%B7%20Gemini-6366f1?style=flat-square">
   <img alt="Pricing" src="https://img.shields.io/badge/Pricing-low--cost%20pay--as--you--go-22c55e?style=flat-square">
   <img alt="Availability" src="https://img.shields.io/badge/Availability-independently%20monitored-0ea5e9?style=flat-square">
-  <img alt="Payments" src="https://img.shields.io/badge/Payments-Alipay%20%C2%B7%20WeChat%20Pay-f59e0b?style=flat-square">
+  <img alt="Payments" src="https://img.shields.io/badge/Payments-Alipay%20%C2%B7%20Crypto%20Pay-f59e0b?style=flat-square">
 </p>
 
 ## Support the Author
