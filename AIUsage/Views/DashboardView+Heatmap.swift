@@ -17,6 +17,7 @@ struct LocalTokenUsageHeatmap: View {
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var hoveredCell: HeatmapCellID?
     /// tooltip 卡片实测高度，用于「靠底行向上翻转」时精确定位（避免被页面底部遮挡）。
@@ -24,7 +25,11 @@ struct LocalTokenUsageHeatmap: View {
     /// GeometryReader 本身没有内容固有高度；由实际格子尺寸回传精确高度，避免小格子仍占用最大网格高度。
     @State private var gridContentHeight: CGFloat = 108
 
-    private static let tooltipWidth: CGFloat = 280
+    /// 上层容器通过该回调提升当前卡片的 zIndex；只在 tooltip 显隐切换时触发。
+    var onHoverStateChange: ((Bool) -> Void)? = nil
+
+    private static let tooltipMinWidth: CGFloat = 240
+    private static let tooltipMaxWidth: CGFloat = 316
 
     // MARK: - Data
 
@@ -122,15 +127,25 @@ struct LocalTokenUsageHeatmap: View {
         return 4
     }
 
-    private func color(for bin: Int, active: Bool) -> Color {
-        guard active else { return Color.primary.opacity(colorScheme == .dark ? 0.04 : 0.03) }
+    /// 每个格子先铺不透明底色，再叠品牌色。这样强度仍有层次，但不会把卡片内容透到格子里。
+    private func cellBaseColor(active: Bool) -> Color {
+        if colorScheme == .dark {
+            return active
+                ? Color(red: 0.196, green: 0.208, blue: 0.235)
+                : Color(red: 0.145, green: 0.153, blue: 0.173)
+        }
+        return active
+            ? Color(red: 0.871, green: 0.894, blue: 0.925)
+            : Color(red: 0.929, green: 0.945, blue: 0.965)
+    }
+
+    private func accentOpacity(for bin: Int) -> Double {
         switch bin {
-        case 0: return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.07)
-        case 1: return accent.opacity(colorScheme == .dark ? 0.32 : 0.26)
-        case 2: return accent.opacity(colorScheme == .dark ? 0.54 : 0.46)
-        case 3: return accent.opacity(colorScheme == .dark ? 0.76 : 0.68)
-        case 4: return accent.opacity(colorScheme == .dark ? 0.96 : 0.90)
-        default: return Color.clear
+        case 1: return colorScheme == .dark ? 0.44 : 0.38
+        case 2: return colorScheme == .dark ? 0.62 : 0.56
+        case 3: return colorScheme == .dark ? 0.80 : 0.74
+        case 4: return colorScheme == .dark ? 0.98 : 0.92
+        default: return 0
         }
     }
 
@@ -209,6 +224,10 @@ struct LocalTokenUsageHeatmap: View {
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 18).fill(AppSurface.card(colorScheme)))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppStroke.card(colorScheme), lineWidth: 1))
+        .onDisappear {
+            hoveredCell = nil
+            onHoverStateChange?(false)
+        }
     }
 
     // MARK: - Header
@@ -400,22 +419,29 @@ struct LocalTokenUsageHeatmap: View {
                         let cornerRadius = max(2, min(4, cellSide * 0.24))
 
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(color(for: binIndex, active: isActive))
+                            .fill(cellBaseColor(active: isActive))
                             .frame(width: cellSide, height: cellSide)
+                            .overlay {
+                                if binIndex > 0 {
+                                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                        .fill(accent.opacity(accentOpacity(for: binIndex)))
+                                }
+                            }
                             .overlay(
                                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                     .stroke(
-                                        isHovered ? accent : (isToday ? accent.opacity(0.9) : Color.clear),
-                                        lineWidth: isHovered ? 1.5 : (isToday ? 1 : 0)
+                                        isHovered
+                                            ? AppContent.primary(colorScheme).opacity(0.92)
+                                            : (isToday ? accent : Color.clear),
+                                        lineWidth: isHovered ? 1.5 : (isToday ? 1.2 : 0)
                                     )
                             )
-                            .scaleEffect(isHovered ? 1.3 : 1.0)
+                            .shadow(color: isHovered ? accent.opacity(0.50) : .clear, radius: 3)
+                            .scaleEffect(isHovered && !reduceMotion ? 1.16 : 1.0)
                             .zIndex(isHovered ? 10 : 0)
-                            .animation(.easeOut(duration: 0.12), value: isHovered)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: isHovered)
                             .onHover { hovering in
-                                withAnimation(.easeInOut(duration: 0.1)) {
-                                    hoveredCell = hovering ? HeatmapCellID(week: week, day: day) : nil
-                                }
+                                updateHoveredCell(hovering ? HeatmapCellID(week: week, day: day) : nil)
                             }
                     }
                 }
@@ -449,7 +475,7 @@ struct LocalTokenUsageHeatmap: View {
         let cellTopY = gridTopY + CGFloat(cell.day) * (cellSide + spacing)
         let cellBottomY = cellTopY + cellSide
 
-        let tw = Self.tooltipWidth
+        let tw = max(Self.tooltipMinWidth, min(Self.tooltipMaxWidth, containerWidth - 8))
         let xClamped = max(4, min(containerWidth - tw - 4, cellCenterX - tw / 2))
 
         // 靠底部三行（周五/六/日）向上翻转，避免 tooltip 被页面底部裁掉；其余行仍朝下。
@@ -472,6 +498,7 @@ struct LocalTokenUsageHeatmap: View {
         )
         .offset(x: xClamped, y: yPos)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .zIndex(1_000)
         .allowsHitTesting(false)
         .onPreferenceChange(TooltipHeightKey.self) { tooltipHeight = $0 }
     }
@@ -490,22 +517,33 @@ struct LocalTokenUsageHeatmap: View {
 
                 if !models.isEmpty {
                     Divider()
+                        .overlay(AppStroke.subtle(colorScheme))
                         .padding(.vertical, 6)
 
                     tooltipModelList(models: models)
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .foregroundStyle(AppContent.floatingPrimary(colorScheme))
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(AppSurface.elevated(colorScheme))
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.6 : 0.18), radius: 16, y: 6)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(AppSurface.floatingPanel(colorScheme))
+                .shadow(color: AppShadow.floatingPanel(colorScheme), radius: 22, y: 9)
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.06), radius: 2, y: 1)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(AppStroke.strong(colorScheme), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppStroke.floatingPanel(colorScheme), lineWidth: 1)
         )
+        .overlay(alignment: .leading) {
+            Capsule(style: .continuous)
+                .fill(accent)
+                .frame(width: 3)
+                .padding(.vertical, 12)
+                .padding(.leading, 1)
+        }
     }
 
     private static let tooltipDateFormatterZh: DateFormatter = {
@@ -528,12 +566,13 @@ struct LocalTokenUsageHeatmap: View {
 
         return HStack(spacing: 4) {
             Text(dateStr)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppContent.floatingPrimary(colorScheme))
             Spacer()
             if !isActive {
                 Text(L("Future", "尚未到达"))
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
             }
         }
         .padding(.bottom, isActive ? 6 : 0)
@@ -543,39 +582,40 @@ struct LocalTokenUsageHeatmap: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(L("Tokens", "Tokens"))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
                 Text(formatNumber(tokens))
-                    .font(.caption.weight(.medium).monospacedDigit())
+                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(AppContent.floatingPrimary(colorScheme))
             }
             Spacer()
         }
     }
 
     private func tooltipModelList(models: [ModelDetail]) -> some View {
-        let palette: [Color] = [.green, .blue, .orange, .purple, .pink, .teal, .yellow, .red]
         let detailFont = Font.system(size: 9).monospacedDigit()
         let detailLabelFont = Font.system(size: 8)
 
         return VStack(alignment: .leading, spacing: 6) {
             Text(L("Models", "模型"))
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(AppContent.floatingTertiary(colorScheme))
 
-            ForEach(Array(models.prefix(5).enumerated()), id: \.offset) { idx, entry in
+            ForEach(Array(models.prefix(5).enumerated()), id: \.offset) { _, entry in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(palette[idx % palette.count].opacity(0.8))
-                            .frame(width: 5, height: 5)
+                            .fill(accent)
+                            .frame(width: 6, height: 6)
                         Text(entry.model)
-                            .font(.system(size: 10))
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(AppContent.floatingPrimary(colorScheme))
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 4)
                         Text(formatCompactNumber(Double(entry.tokens)))
                             .font(.system(size: 10).monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppContent.floatingSecondary(colorScheme))
                             .fixedSize()
                     }
 
@@ -597,7 +637,7 @@ struct LocalTokenUsageHeatmap: View {
             if models.count > 5 {
                 Text(L("+\(models.count - 5) more", "+\(models.count - 5) 更多"))
                     .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
             }
         }
     }
@@ -606,10 +646,10 @@ struct LocalTokenUsageHeatmap: View {
         HStack(spacing: 2) {
             Text(label)
                 .font(lblFont)
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(AppContent.floatingTertiary(colorScheme))
             Text(formatCompactNumber(Double(value)))
                 .font(valFont)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(AppContent.floatingSecondary(colorScheme))
         }
         .frame(minWidth: 52, alignment: .leading)
     }
@@ -675,6 +715,15 @@ struct LocalTokenUsageHeatmap: View {
 
     // MARK: - Helpers
 
+    private func updateHoveredCell(_ cell: HeatmapCellID?) {
+        let wasShowingTooltip = hoveredCell != nil
+        let isShowingTooltip = cell != nil
+        hoveredCell = cell
+        if wasShowingTooltip != isShowingTooltip {
+            onHoverStateChange?(isShowingTooltip)
+        }
+    }
+
     private static let peakDateFormatterZh: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
@@ -705,6 +754,28 @@ struct LocalTokenUsageHeatmap: View {
 private struct HeatmapCellID: Equatable {
     let week: Int
     let day: Int
+}
+
+/// 热力图品牌色需要同时承担标题、焦点描边和色阶端点，因此按主题分别校准。
+/// 浅色版本加深以满足小字号文字对比；深色版本提亮，避免在炭灰表面发闷。
+enum HeatmapBrandColor {
+    static func claude(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.902, green: 0.510, blue: 0.290)
+            : Color(red: 0.659, green: 0.310, blue: 0.149)
+    }
+
+    static func codex(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.537, green: 0.584, blue: 1.000)
+            : Color(red: 0.310, green: 0.361, blue: 0.784)
+    }
+
+    static func openCode(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.208, green: 0.804, blue: 0.745)
+            : Color(red: 0.000, green: 0.490, blue: 0.459)
+    }
 }
 
 private struct TooltipHeightKey: PreferenceKey {

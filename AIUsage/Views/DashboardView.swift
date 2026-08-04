@@ -4,6 +4,7 @@ struct DashboardView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.colorScheme) private var colorScheme
+    @State private var activeHeatmapID: String?
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
@@ -120,9 +121,9 @@ struct DashboardView: View {
 
     private var heatmapSpecs: [HeatmapSpec] {
         [
-            HeatmapSpec(id: "claude", providers: claudeLocalProviders, label: "Claude", asset: "claude", accent: Color(red: 0.85, green: 0.47, blue: 0.26)),
-            HeatmapSpec(id: "codex-cost", providers: codexLocalProviders, label: "Codex", asset: "codex", accent: .indigo),
-            HeatmapSpec(id: "opencode", providers: opencodeLocalProviders, label: "OpenCode", asset: "opencode", accent: Color(red: 0.18, green: 0.83, blue: 0.75))
+            HeatmapSpec(id: "claude", providers: claudeLocalProviders, label: "Claude", asset: "claude", accent: HeatmapBrandColor.claude(colorScheme)),
+            HeatmapSpec(id: "codex-cost", providers: codexLocalProviders, label: "Codex", asset: "codex", accent: HeatmapBrandColor.codex(colorScheme)),
+            HeatmapSpec(id: "opencode", providers: opencodeLocalProviders, label: "OpenCode", asset: "opencode", accent: HeatmapBrandColor.openCode(colorScheme))
         ].filter { !$0.providers.isEmpty }
     }
 
@@ -132,7 +133,14 @@ struct DashboardView: View {
             brandLabel: spec.label,
             brandAsset: spec.asset,
             accent: spec.accent,
-            weeks: dashboardHeatmapWeeks
+            weeks: dashboardHeatmapWeeks,
+            onHoverStateChange: { isShowingTooltip in
+                if isShowingTooltip {
+                    activeHeatmapID = spec.id
+                } else if activeHeatmapID == spec.id {
+                    activeHeatmapID = nil
+                }
+            }
         )
     }
 
@@ -148,6 +156,7 @@ struct DashboardView: View {
             ForEach(heatmapSpecs) { spec in
                 heatmap(for: spec)
                     .frame(maxWidth: .infinity)
+                    .zIndex(activeHeatmapID == spec.id ? 1_000 : 0)
             }
         }
         .zIndex(1)

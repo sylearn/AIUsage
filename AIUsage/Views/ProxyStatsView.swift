@@ -20,6 +20,7 @@ struct ProxyStatsView: View {
     @State var contentWidth: CGFloat = 0
     @State var expandedModels: Set<String> = []
     @State var selectedModels: Set<String> = []
+    @State var activeHeatmapID: String?
 
     // MARK: - Types
 
@@ -346,26 +347,49 @@ struct ProxyStatsView: View {
                     providers: claudeLocalProviders,
                     brandLabel: "Claude",
                     brandAsset: "claude",
-                    accent: Color(red: 0.85, green: 0.47, blue: 0.26)
+                    accent: HeatmapBrandColor.claude(colorScheme),
+                    onHoverStateChange: { isShowingTooltip in
+                        if isShowingTooltip {
+                            activeHeatmapID = "claude"
+                        } else if activeHeatmapID == "claude" {
+                            activeHeatmapID = nil
+                        }
+                    }
                 )
-                .zIndex(1)
+                .zIndex(activeHeatmapID == "claude" ? 1_000 : 0)
             }
             if showCodex && !codexLocalProviders.isEmpty {
                 LocalTokenUsageHeatmap(
                     providers: codexLocalProviders,
                     brandLabel: codexHeatmapLabel,
                     brandAsset: "codex",
-                    accent: .indigo,
-                    track: effectiveTrack
+                    accent: HeatmapBrandColor.codex(colorScheme),
+                    track: effectiveTrack,
+                    onHoverStateChange: { isShowingTooltip in
+                        if isShowingTooltip {
+                            activeHeatmapID = "codex"
+                        } else if activeHeatmapID == "codex" {
+                            activeHeatmapID = nil
+                        }
+                    }
                 )
+                .zIndex(activeHeatmapID == "codex" ? 1_000 : 0)
             }
             if showOpenCode && !opencodeLocalProviders.isEmpty {
                 LocalTokenUsageHeatmap(
                     providers: opencodeLocalProviders,
                     brandLabel: "OpenCode",
                     brandAsset: "opencode",
-                    accent: Color(red: 0.18, green: 0.83, blue: 0.75)
+                    accent: HeatmapBrandColor.openCode(colorScheme),
+                    onHoverStateChange: { isShowingTooltip in
+                        if isShowingTooltip {
+                            activeHeatmapID = "opencode"
+                        } else if activeHeatmapID == "opencode" {
+                            activeHeatmapID = nil
+                        }
+                    }
                 )
+                .zIndex(activeHeatmapID == "opencode" ? 1_000 : 0)
             }
         }
     }

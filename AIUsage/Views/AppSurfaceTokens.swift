@@ -54,6 +54,19 @@ enum AppSurface {
         }
     }
 
+    /// 悬浮检查器、瞬时详情等必须完全遮住下层内容的浮动面。
+    /// 与 elevated 的轻量叠色不同，这里两种模式都使用不透明颜色，避免图表、文字透底。
+    static func floatingPanel(_ scheme: ColorScheme) -> Color {
+        switch scheme {
+        case .dark:
+            return Color(red: 0.137, green: 0.153, blue: 0.184)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.973, green: 0.980, blue: 0.988)
+        }
+    }
+
     /// 芯片 / 胶囊 / 轻量行底。
     static func chip(_ scheme: ColorScheme) -> Color {
         switch scheme {
@@ -136,6 +149,18 @@ enum AppStroke {
             return Color(red: 0.655, green: 0.714, blue: 0.792)
         }
     }
+
+    /// 浮动面需要比普通卡片更明确的边界，尤其用于跨卡片绘制的检查器。
+    static func floatingPanel(_ scheme: ColorScheme) -> Color {
+        switch scheme {
+        case .dark:
+            return Color.white.opacity(0.24)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.565, green: 0.624, blue: 0.702)
+        }
+    }
 }
 
 enum AppContent {
@@ -174,6 +199,25 @@ enum AppContent {
             return Color(red: 0.435, green: 0.498, blue: 0.588)
         }
     }
+
+    /// 不透明浮动面上的固定内容色，避免系统层级色叠加后再次变灰、变透。
+    static func floatingPrimary(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.957, green: 0.969, blue: 0.984)
+            : Color(red: 0.090, green: 0.129, blue: 0.200)
+    }
+
+    static func floatingSecondary(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.761, green: 0.792, blue: 0.835)
+            : Color(red: 0.310, green: 0.373, blue: 0.467)
+    }
+
+    static func floatingTertiary(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.616, green: 0.659, blue: 0.722)
+            : Color(red: 0.380, green: 0.440, blue: 0.530)
+    }
 }
 
 enum AppAccent {
@@ -189,6 +233,12 @@ enum AppShadow {
         scheme == .dark
             ? Color.black.opacity(0.22)
             : Color(red: 0.16, green: 0.23, blue: 0.34).opacity(0.08)
+    }
+
+    static func floatingPanel(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color.black.opacity(0.68)
+            : Color(red: 0.09, green: 0.14, blue: 0.22).opacity(0.20)
     }
 }
 
