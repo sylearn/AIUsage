@@ -231,7 +231,9 @@ enum AppAccent {
 enum AppShadow {
     static func card(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color.black.opacity(0.22)
+            // 深色卡片靠描边和表面明度分层。半径为 0 的黑色阴影会把整张卡片
+            // （包括文字）原样向下复制，形成清晰残影，因此必须真正透明。
+            ? Color.clear
             : Color(red: 0.16, green: 0.23, blue: 0.34).opacity(0.08)
     }
 

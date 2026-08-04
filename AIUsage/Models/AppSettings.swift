@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import AppKit
 
 // MARK: - Navigation (used by AppState.selectedSection)
 
@@ -178,14 +179,6 @@ final class AppSettings: ObservableObject {
 
     @Published var themeMode: String = UserDefaults.standard.string(forKey: DefaultsKey.themeMode) ?? "system"
 
-    var resolvedColorScheme: ColorScheme? {
-        switch themeMode {
-        case "light": return .light
-        case "dark": return .dark
-        default: return nil
-        }
-    }
-
     @Published var autoRefreshInterval: Int = {
         let defaults = UserDefaults.standard
         let storedValue = defaults.object(forKey: DefaultsKey.autoRefreshInterval) != nil
@@ -302,12 +295,34 @@ final class AppSettings: ObservableObject {
         menuBarMetricType = .both
 
         setupAutoPersist()
+        applyAppearance(for: themeMode)
+    }
+
+    /// 使用 AppKit 的应用级 appearance 作为唯一主题入口。
+    /// `nil` 会原生继承 macOS，并持续跟随系统变化；不会出现 SwiftUI 从显式值切回 nil 时残留旧主题的问题。
+    private func applyAppearance(for mode: String) {
+        switch mode {
+        case "light":
+            NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        case "dark":
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        default:
+            NSApplication.shared.appearance = nil
+        }
     }
 
     private func setupAutoPersist() {
         let defaults = UserDefaults.standard
 
-        $themeMode.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.themeMode) }.store(in: &cancellables)
+        $themeMode
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] mode in
+                defaults.set(mode, forKey: DefaultsKey.themeMode)
+                self?.applyAppearance(for: mode)
+            }
+            .store(in: &cancellables)
         $language.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.appLanguage) }.store(in: &cancellables)
         $quotaIndicatorStyle.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.quotaIndicatorStyle) }.store(in: &cancellables)
         $quotaIndicatorMetric.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.quotaIndicatorMetric) }.store(in: &cancellables)

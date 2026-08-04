@@ -192,7 +192,6 @@ struct AIUsageApp: App {
                 .environmentObject(proxyViewModel)
                 .environmentObject(sparkle)
                 .frame(minWidth: 900, idealWidth: 1100, minHeight: 600, idealHeight: 700)
-                .preferredColorScheme(appSettings.resolvedColorScheme)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

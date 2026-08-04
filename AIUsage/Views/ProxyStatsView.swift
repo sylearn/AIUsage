@@ -20,7 +20,7 @@ struct ProxyStatsView: View {
     @State var contentWidth: CGFloat = 0
     @State var expandedModels: Set<String> = []
     @State var selectedModels: Set<String> = []
-    @State var activeHeatmapID: String?
+    @State var activeHeatmapTooltip: HeatmapTooltipPresentation?
 
     // MARK: - Types
 
@@ -137,36 +137,50 @@ struct ProxyStatsView: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 0) {
-            if localProviders.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    let ranked = rankedTrendSeries
-                    let colorMap = buildModelColorMap(from: ranked)
-                    LazyVStack(spacing: 16) {
-                        controlDeck
-                        summaryStrip
-                        heatmapSection
-                            // 抬高层级，让热力图 tooltip 绘制在下方分布/详情卡片之上，不被遮挡。
-                            .zIndex(1)
-                        insightPanelsSection(colorMap: colorMap, sparklineMap: buildSparklineMap(from: ranked))
-                    }
-                    .padding(20)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .preference(key: StatsContentWidthKey.self, value: proxy.size.width)
+        GeometryReader { viewport in
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    if localProviders.isEmpty {
+                        emptyState
+                    } else {
+                        ScrollView {
+                            let ranked = rankedTrendSeries
+                            let colorMap = buildModelColorMap(from: ranked)
+                            LazyVStack(spacing: 16) {
+                                controlDeck
+                                summaryStrip
+                                heatmapSection
+                                insightPanelsSection(colorMap: colorMap, sparklineMap: buildSparklineMap(from: ranked))
+                            }
+                            .padding(20)
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear
+                                        .preference(key: StatsContentWidthKey.self, value: proxy.size.width)
+                                }
+                            )
                         }
+                    }
+                }
+
+                if let activeHeatmapTooltip {
+                    HeatmapFloatingTooltipLayer(
+                        presentation: activeHeatmapTooltip,
+                        containerSize: viewport.size
                     )
+                    .id(activeHeatmapTooltip.identity)
+                    .zIndex(10_000)
                 }
             }
+            .coordinateSpace(name: HeatmapTooltipCoordinateSpace.name)
         }
         .appPageChrome(colorScheme)
         .onChange(of: familyRaw) { _, _ in
+            activeHeatmapTooltip = nil
             pruneSelectedModels()
         }
         .onChange(of: trackRaw) { _, _ in
+            activeHeatmapTooltip = nil
             pruneSelectedModels()
         }
         .onPreferenceChange(StatsContentWidthKey.self) { newWidth in
@@ -348,15 +362,14 @@ struct ProxyStatsView: View {
                     brandLabel: "Claude",
                     brandAsset: "claude",
                     accent: HeatmapBrandColor.claude(colorScheme),
-                    onHoverStateChange: { isShowingTooltip in
-                        if isShowingTooltip {
-                            activeHeatmapID = "claude"
-                        } else if activeHeatmapID == "claude" {
-                            activeHeatmapID = nil
+                    onTooltipChange: { presentation in
+                        if let presentation {
+                            activeHeatmapTooltip = presentation
+                        } else if activeHeatmapTooltip?.sourceID == "claude" {
+                            activeHeatmapTooltip = nil
                         }
                     }
                 )
-                .zIndex(activeHeatmapID == "claude" ? 1_000 : 0)
             }
             if showCodex && !codexLocalProviders.isEmpty {
                 LocalTokenUsageHeatmap(
@@ -365,15 +378,14 @@ struct ProxyStatsView: View {
                     brandAsset: "codex",
                     accent: HeatmapBrandColor.codex(colorScheme),
                     track: effectiveTrack,
-                    onHoverStateChange: { isShowingTooltip in
-                        if isShowingTooltip {
-                            activeHeatmapID = "codex"
-                        } else if activeHeatmapID == "codex" {
-                            activeHeatmapID = nil
+                    onTooltipChange: { presentation in
+                        if let presentation {
+                            activeHeatmapTooltip = presentation
+                        } else if activeHeatmapTooltip?.sourceID == "codex" {
+                            activeHeatmapTooltip = nil
                         }
                     }
                 )
-                .zIndex(activeHeatmapID == "codex" ? 1_000 : 0)
             }
             if showOpenCode && !opencodeLocalProviders.isEmpty {
                 LocalTokenUsageHeatmap(
@@ -381,15 +393,14 @@ struct ProxyStatsView: View {
                     brandLabel: "OpenCode",
                     brandAsset: "opencode",
                     accent: HeatmapBrandColor.openCode(colorScheme),
-                    onHoverStateChange: { isShowingTooltip in
-                        if isShowingTooltip {
-                            activeHeatmapID = "opencode"
-                        } else if activeHeatmapID == "opencode" {
-                            activeHeatmapID = nil
+                    onTooltipChange: { presentation in
+                        if let presentation {
+                            activeHeatmapTooltip = presentation
+                        } else if activeHeatmapTooltip?.sourceID == "opencode" {
+                            activeHeatmapTooltip = nil
                         }
                     }
                 )
-                .zIndex(activeHeatmapID == "opencode" ? 1_000 : 0)
             }
         }
     }

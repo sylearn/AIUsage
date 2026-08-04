@@ -20,16 +20,11 @@ struct LocalTokenUsageHeatmap: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var hoveredCell: HeatmapCellID?
-    /// tooltip 卡片实测高度，用于「靠底行向上翻转」时精确定位（避免被页面底部遮挡）。
-    @State private var tooltipHeight: CGFloat = 0
     /// GeometryReader 本身没有内容固有高度；由实际格子尺寸回传精确高度，避免小格子仍占用最大网格高度。
     @State private var gridContentHeight: CGFloat = 108
 
-    /// 上层容器通过该回调提升当前卡片的 zIndex；只在 tooltip 显隐切换时触发。
-    var onHoverStateChange: ((Bool) -> Void)? = nil
-
-    private static let tooltipMinWidth: CGFloat = 240
-    private static let tooltipMaxWidth: CGFloat = 316
+    /// tooltip 必须由页面根层统一绘制；LazyVGrid 单元格内部的 overlay 无法跨越后续网格行。
+    var onTooltipChange: ((HeatmapTooltipPresentation?) -> Void)? = nil
 
     // MARK: - Data
 
@@ -226,7 +221,7 @@ struct LocalTokenUsageHeatmap: View {
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppStroke.card(colorScheme), lineWidth: 1))
         .onDisappear {
             hoveredCell = nil
-            onHoverStateChange?(false)
+            onTooltipChange?(nil)
         }
     }
 
@@ -275,6 +270,7 @@ struct LocalTokenUsageHeatmap: View {
             let columnPitch = cellSide + spacing
             let gridHeight = cellSide * 7 + spacing * 6
             let contentHeight = monthLabelHeight + Self.monthToGridSpacing + gridHeight
+            let containerFrame = proxy.frame(in: .named(HeatmapTooltipCoordinateSpace.name))
 
             VStack(alignment: .leading, spacing: Self.monthToGridSpacing) {
                 monthLabelsRow(
@@ -290,26 +286,18 @@ struct LocalTokenUsageHeatmap: View {
                     weekdayLabels(cellSide: cellSide, spacing: spacing)
                         .frame(width: weekdayLabelWidth, height: gridHeight, alignment: .topLeading)
 
-                    gridColumns(cellSide: cellSide, spacing: spacing, snap: snap, visibleWeeks: visibleWeeks, weekOffset: weekOffset)
+                    gridColumns(
+                        cellSide: cellSide,
+                        spacing: spacing,
+                        snap: snap,
+                        visibleWeeks: visibleWeeks,
+                        weekOffset: weekOffset,
+                        containerFrame: containerFrame
+                    )
                 }
             }
             .frame(maxWidth: .infinity, minHeight: contentHeight, maxHeight: contentHeight, alignment: .topLeading)
             .preference(key: HeatmapGridHeightKey.self, value: contentHeight)
-            .overlay {
-                if let hovered = hoveredCell, hovered.week < visibleWeeks {
-                    heatmapTooltipOverlay(
-                        cell: hovered,
-                        snap: snap,
-                        cellSide: cellSide,
-                        spacing: spacing,
-                        columnPitch: columnPitch,
-                        weekdayLabelWidth: weekdayLabelWidth,
-                        monthLabelHeight: monthLabelHeight,
-                        containerWidth: proxy.size.width,
-                        weekOffset: weekOffset
-                    )
-                }
-            }
         }
         .frame(height: gridContentHeight)
         .onPreferenceChange(HeatmapGridHeightKey.self) { height in
@@ -401,7 +389,14 @@ struct LocalTokenUsageHeatmap: View {
         }
     }
 
-    private func gridColumns(cellSide: CGFloat, spacing: CGFloat, snap: HeatmapSnapshot, visibleWeeks: Int, weekOffset: Int) -> some View {
+    private func gridColumns(
+        cellSide: CGFloat,
+        spacing: CGFloat,
+        snap: HeatmapSnapshot,
+        visibleWeeks: Int,
+        weekOffset: Int,
+        containerFrame: CGRect
+    ) -> some View {
         let tokens = snap.tokens
         let computedThresholds = snap.thresholds
         let today = Calendar.current.startOfDay(for: Date())
@@ -441,217 +436,36 @@ struct LocalTokenUsageHeatmap: View {
                             .zIndex(isHovered ? 10 : 0)
                             .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: isHovered)
                             .onHover { hovering in
-                                updateHoveredCell(hovering ? HeatmapCellID(week: week, day: day) : nil)
+                                let cell = HeatmapCellID(week: week, day: day)
+                                if hovering {
+                                    let gridTopY = Self.monthLabelHeight + Self.monthToGridSpacing
+                                    let anchor = CGRect(
+                                        x: containerFrame.minX + Self.weekdayLabelWidth + CGFloat(week) * (cellSide + spacing),
+                                        y: containerFrame.minY + gridTopY + CGFloat(day) * (cellSide + spacing),
+                                        width: cellSide,
+                                        height: cellSide
+                                    )
+                                    let models = (isActive && count > 0) ? modelBreakdown(for: cellDate) : []
+                                    updateHoveredCell(
+                                        cell,
+                                        presentation: HeatmapTooltipPresentation(
+                                            sourceID: brandAsset ?? brandLabel ?? "local-token-usage",
+                                            date: cellDate,
+                                            isActive: isActive,
+                                            tokens: count,
+                                            models: models,
+                                            accent: accent,
+                                            anchor: anchor
+                                        )
+                                    )
+                                } else if hoveredCell == cell {
+                                    updateHoveredCell(nil, presentation: nil)
+                                }
                             }
                     }
                 }
             }
         }
-    }
-
-    // MARK: - Tooltip Overlay
-
-    @ViewBuilder
-    private func heatmapTooltipOverlay(
-        cell: HeatmapCellID,
-        snap: HeatmapSnapshot,
-        cellSide: CGFloat,
-        spacing: CGFloat,
-        columnPitch: CGFloat,
-        weekdayLabelWidth: CGFloat,
-        monthLabelHeight: CGFloat,
-        containerWidth: CGFloat,
-        weekOffset: Int
-    ) -> some View {
-        // cell.week 是相对列号（0..<visibleWeeks）：定位用相对列，取日期用绝对周（含偏移）。
-        let cellDate = date(forWeek: cell.week + weekOffset, day: cell.day)
-        let today = Calendar.current.startOfDay(for: Date())
-        let isActive = cellDate <= today
-        let tokens = isActive ? (snap.tokens[cellDate] ?? 0) : 0
-        let models = (isActive && tokens > 0) ? modelBreakdown(for: cellDate) : []
-
-        let cellCenterX = weekdayLabelWidth + CGFloat(cell.week) * columnPitch + cellSide / 2
-        let gridTopY = monthLabelHeight + Self.monthToGridSpacing
-        let cellTopY = gridTopY + CGFloat(cell.day) * (cellSide + spacing)
-        let cellBottomY = cellTopY + cellSide
-
-        let tw = max(Self.tooltipMinWidth, min(Self.tooltipMaxWidth, containerWidth - 8))
-        let xClamped = max(4, min(containerWidth - tw - 4, cellCenterX - tw / 2))
-
-        // 靠底部三行（周五/六/日）向上翻转，避免 tooltip 被页面底部裁掉；其余行仍朝下。
-        let flipUp = cell.day >= 4
-        let measuredHeight = tooltipHeight > 0 ? tooltipHeight : 160
-        let yPos = flipUp ? (cellTopY - 8 - measuredHeight) : (cellBottomY + 8)
-
-        heatmapTooltipCard(
-            date: cellDate,
-            isActive: isActive,
-            tokens: tokens,
-            models: models
-        )
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(width: tw, alignment: .topLeading)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: TooltipHeightKey.self, value: proxy.size.height)
-            }
-        )
-        .offset(x: xClamped, y: yPos)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .zIndex(1_000)
-        .allowsHitTesting(false)
-        .onPreferenceChange(TooltipHeightKey.self) { tooltipHeight = $0 }
-    }
-
-    private func heatmapTooltipCard(
-        date: Date,
-        isActive: Bool,
-        tokens: Int,
-        models: [ModelDetail]
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            tooltipDateHeader(date: date, isActive: isActive)
-
-            if isActive {
-                tooltipMetrics(tokens: tokens)
-
-                if !models.isEmpty {
-                    Divider()
-                        .overlay(AppStroke.subtle(colorScheme))
-                        .padding(.vertical, 6)
-
-                    tooltipModelList(models: models)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .foregroundStyle(AppContent.floatingPrimary(colorScheme))
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(AppSurface.floatingPanel(colorScheme))
-                .shadow(color: AppShadow.floatingPanel(colorScheme), radius: 22, y: 9)
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.06), radius: 2, y: 1)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(AppStroke.floatingPanel(colorScheme), lineWidth: 1)
-        )
-        .overlay(alignment: .leading) {
-            Capsule(style: .continuous)
-                .fill(accent)
-                .frame(width: 3)
-                .padding(.vertical, 12)
-                .padding(.leading, 1)
-        }
-    }
-
-    private static let tooltipDateFormatterZh: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "yyyy年M月d日 EEE"
-        return f
-    }()
-
-    private static let tooltipDateFormatterEn: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "EEE, MMM d, yyyy"
-        return f
-    }()
-
-    private func tooltipDateHeader(date: Date, isActive: Bool) -> some View {
-        let formatter = appState.language == "zh" ? Self.tooltipDateFormatterZh : Self.tooltipDateFormatterEn
-        let dateStr = formatter.string(from: date)
-
-        return HStack(spacing: 4) {
-            Text(dateStr)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AppContent.floatingPrimary(colorScheme))
-            Spacer()
-            if !isActive {
-                Text(L("Future", "尚未到达"))
-                    .font(.caption2)
-                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
-            }
-        }
-        .padding(.bottom, isActive ? 6 : 0)
-    }
-
-    private func tooltipMetrics(tokens: Int) -> some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(L("Tokens", "Tokens"))
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
-                Text(formatNumber(tokens))
-                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(AppContent.floatingPrimary(colorScheme))
-            }
-            Spacer()
-        }
-    }
-
-    private func tooltipModelList(models: [ModelDetail]) -> some View {
-        let detailFont = Font.system(size: 9).monospacedDigit()
-        let detailLabelFont = Font.system(size: 8)
-
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(L("Models", "模型"))
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(AppContent.floatingTertiary(colorScheme))
-
-            ForEach(Array(models.prefix(5).enumerated()), id: \.offset) { _, entry in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(accent)
-                            .frame(width: 6, height: 6)
-                        Text(entry.model)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(AppContent.floatingPrimary(colorScheme))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 4)
-                        Text(formatCompactNumber(Double(entry.tokens)))
-                            .font(.system(size: 10).monospacedDigit())
-                            .foregroundStyle(AppContent.floatingSecondary(colorScheme))
-                            .fixedSize()
-                    }
-
-                    if entry.cacheReadTokens > 0 || entry.inputTokens > 0 || entry.outputTokens > 0 {
-                        HStack(spacing: 0) {
-                            Spacer().frame(width: 10)
-                            tokenDetailCell(L("Cache", "缓存"), entry.cacheReadTokens, detailFont, detailLabelFont)
-                            tokenDetailCell(L("Input", "输入"), entry.inputTokens, detailFont, detailLabelFont)
-                            tokenDetailCell(L("Output", "输出"), entry.outputTokens, detailFont, detailLabelFont)
-                            if entry.cacheCreateTokens > 0 {
-                                tokenDetailCell(L("Write", "写入"), entry.cacheCreateTokens, detailFont, detailLabelFont)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
-            }
-
-            if models.count > 5 {
-                Text(L("+\(models.count - 5) more", "+\(models.count - 5) 更多"))
-                    .font(.system(size: 9))
-                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
-            }
-        }
-    }
-
-    private func tokenDetailCell(_ label: String, _ value: Int, _ valFont: Font, _ lblFont: Font) -> some View {
-        HStack(spacing: 2) {
-            Text(label)
-                .font(lblFont)
-                .foregroundStyle(AppContent.floatingTertiary(colorScheme))
-            Text(formatCompactNumber(Double(value)))
-                .font(valFont)
-                .foregroundStyle(AppContent.floatingSecondary(colorScheme))
-        }
-        .frame(minWidth: 52, alignment: .leading)
     }
 
     // MARK: - Footer
@@ -715,13 +529,9 @@ struct LocalTokenUsageHeatmap: View {
 
     // MARK: - Helpers
 
-    private func updateHoveredCell(_ cell: HeatmapCellID?) {
-        let wasShowingTooltip = hoveredCell != nil
-        let isShowingTooltip = cell != nil
+    private func updateHoveredCell(_ cell: HeatmapCellID?, presentation: HeatmapTooltipPresentation?) {
         hoveredCell = cell
-        if wasShowingTooltip != isShowingTooltip {
-            onHoverStateChange?(isShowingTooltip)
-        }
+        onTooltipChange?(presentation)
     }
 
     private static let peakDateFormatterZh: DateFormatter = {
@@ -778,9 +588,241 @@ enum HeatmapBrandColor {
     }
 }
 
-private struct TooltipHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+enum HeatmapTooltipCoordinateSpace {
+    static let name = "aiusage-heatmap-tooltip-root"
+}
+
+struct HeatmapTooltipPresentation {
+    let sourceID: String
+    let date: Date
+    let isActive: Bool
+    let tokens: Int
+    let models: [LocalTokenUsageHeatmap.ModelDetail]
+    let accent: Color
+    let anchor: CGRect
+
+    var identity: String {
+        "\(sourceID)|\(date.timeIntervalSinceReferenceDate)"
+    }
+}
+
+/// 页面根层唯一的热力图检查器。它是 ScrollView/LazyVGrid 的同级视图，
+/// 因而不会再受单个网格行的绘制顺序或卡片边界限制。
+struct HeatmapFloatingTooltipLayer: View {
+    let presentation: HeatmapTooltipPresentation
+    let containerSize: CGSize
+
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var measuredSize: CGSize = .zero
+
+    private static let horizontalMargin: CGFloat = 12
+    private static let verticalMargin: CGFloat = 12
+    private static let anchorGap: CGFloat = 10
+    private static let maxPanelWidth: CGFloat = 304
+    private static let maxVisibleModels = 4
+
+    var body: some View {
+        let panelWidth = min(Self.maxPanelWidth, max(220, containerSize.width - Self.horizontalMargin * 2))
+        let panelHeight = measuredSize.height > 0 ? measuredSize.height : estimatedHeight
+        let origin = panelOrigin(width: panelWidth, height: panelHeight)
+
+        tooltipCard
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: panelWidth, alignment: .topLeading)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: HeatmapTooltipSizeKey.self, value: proxy.size)
+                }
+            }
+            .offset(x: origin.x, y: origin.y)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .onPreferenceChange(HeatmapTooltipSizeKey.self) { measuredSize = $0 }
+            .onChange(of: presentation.identity) { _, _ in measuredSize = .zero }
+    }
+
+    private var estimatedHeight: CGFloat {
+        let visible = presentation.models.prefix(Self.maxVisibleModels)
+        let detailRows = visible.filter { !modelDetailText($0).isEmpty }.count
+        return 76 + CGFloat(visible.count * 19 + detailRows * 11) + (presentation.models.count > visible.count ? 14 : 0)
+    }
+
+    private func panelOrigin(width: CGFloat, height: CGFloat) -> CGPoint {
+        let maxX = max(Self.horizontalMargin, containerSize.width - width - Self.horizontalMargin)
+        let x = min(max(presentation.anchor.midX - width / 2, Self.horizontalMargin), maxX)
+
+        let above = presentation.anchor.minY - Self.anchorGap - height
+        let below = presentation.anchor.maxY + Self.anchorGap
+        let maxY = max(Self.verticalMargin, containerSize.height - height - Self.verticalMargin)
+        let y: CGFloat
+        if above >= Self.verticalMargin {
+            y = above
+        } else if below + height <= containerSize.height - Self.verticalMargin {
+            y = below
+        } else {
+            y = min(max(below, Self.verticalMargin), maxY)
+        }
+        return CGPoint(x: x, y: y)
+    }
+
+    private var tooltipCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            if presentation.isActive && !presentation.models.isEmpty {
+                Divider()
+                    .overlay(AppStroke.subtle(colorScheme))
+                    .padding(.vertical, 7)
+
+                modelList
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .foregroundStyle(AppContent.floatingPrimary(colorScheme))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(AppSurface.floatingPanel(colorScheme))
+                .shadow(color: AppShadow.floatingPanel(colorScheme), radius: 22, y: 9)
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.06), radius: 2, y: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppStroke.floatingPanel(colorScheme), lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            Capsule(style: .continuous)
+                .fill(presentation.accent)
+                .frame(width: 3)
+                .padding(.vertical, 11)
+                .padding(.leading, 1)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(formattedDate)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppContent.floatingPrimary(colorScheme))
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            if presentation.isActive {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("Tokens")
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(AppContent.floatingTertiary(colorScheme))
+                    Text(formatNumber(presentation.tokens))
+                        .font(.system(size: 13.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(AppContent.floatingPrimary(colorScheme))
+                }
+            } else {
+                Text(L("Future", "尚未到达"))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(AppContent.floatingTertiary(colorScheme))
+            }
+        }
+    }
+
+    private var modelList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(L("Models", "模型"))
+                    .font(.system(size: 9, weight: .semibold))
+                Text("\(presentation.models.count)")
+                    .font(.system(size: 9).monospacedDigit())
+            }
+            .foregroundStyle(AppContent.floatingTertiary(colorScheme))
+
+            ForEach(Array(presentation.models.prefix(Self.maxVisibleModels)), id: \.model) { entry in
+                modelRow(entry)
+            }
+
+            if presentation.models.count > Self.maxVisibleModels {
+                Text(L(
+                    "+\(presentation.models.count - Self.maxVisibleModels) more models",
+                    "还有 \(presentation.models.count - Self.maxVisibleModels) 个模型"
+                ))
+                .font(.system(size: 8.5, weight: .medium))
+                .foregroundStyle(AppContent.floatingTertiary(colorScheme))
+                .padding(.leading, 11)
+            }
+        }
+    }
+
+    private func modelRow(_ entry: LocalTokenUsageHeatmap.ModelDetail) -> some View {
+        let detail = modelDetailText(entry)
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle()
+                .fill(presentation.accent)
+                .frame(width: 6, height: 6)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.model)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(AppContent.floatingPrimary(colorScheme))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 8.5).monospacedDigit())
+                        .foregroundStyle(AppContent.floatingTertiary(colorScheme))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            Text(formatCompactNumber(Double(entry.tokens)))
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(AppContent.floatingSecondary(colorScheme))
+                .fixedSize()
+        }
+    }
+
+    private func modelDetailText(_ entry: LocalTokenUsageHeatmap.ModelDetail) -> String {
+        var parts: [String] = []
+        if entry.inputTokens > 0 {
+            parts.append("\(L("In", "输入")) \(formatCompactNumber(Double(entry.inputTokens)))")
+        }
+        if entry.outputTokens > 0 {
+            parts.append("\(L("Out", "输出")) \(formatCompactNumber(Double(entry.outputTokens)))")
+        }
+        if entry.cacheReadTokens > 0 {
+            parts.append("\(L("Cache", "缓存")) \(formatCompactNumber(Double(entry.cacheReadTokens)))")
+        }
+        if entry.cacheCreateTokens > 0 {
+            parts.append("\(L("Write", "写入")) \(formatCompactNumber(Double(entry.cacheCreateTokens)))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var formattedDate: String {
+        let formatter = appState.language == "zh" ? Self.dateFormatterZh : Self.dateFormatterEn
+        return formatter.string(from: presentation.date)
+    }
+
+    private static let dateFormatterZh: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日 EEE"
+        return formatter
+    }()
+
+    private static let dateFormatterEn: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, MMM d, yyyy"
+        return formatter
+    }()
+}
+
+private struct HeatmapTooltipSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
     }
 }

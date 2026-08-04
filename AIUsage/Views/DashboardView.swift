@@ -4,33 +4,45 @@ struct DashboardView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.colorScheme) private var colorScheme
-    @State private var activeHeatmapID: String?
+    @State private var activeHeatmapTooltip: HeatmapTooltipPresentation?
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                // 本地数据（概览/热力图/聚合）始终立即渲染，不再被网络刷新的全局骨架屏遮挡。
-                if let error = refreshCoordinator.errorMessage {
-                    inlineErrorBanner(error)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                ScrollView {
+                    VStack(spacing: 22) {
+                        // 本地数据（概览/热力图/聚合）始终立即渲染，不再被网络刷新的全局骨架屏遮挡。
+                        if let error = refreshCoordinator.errorMessage {
+                            inlineErrorBanner(error)
+                        }
+
+                        overviewSection
+
+                        if !costTrackingProviders.isEmpty {
+                            heatmapSection
+                        } else if isAwaitingLocalStats {
+                            skeletonHeatmap
+                        }
+
+                        if !isAccountsModuleHidden {
+                            providersSection
+                        }
+                    }
+                    .padding()
                 }
 
-                overviewSection
-
-                if !costTrackingProviders.isEmpty {
-                    heatmapSection
-                        // 让热力图悬浮提示卡片绘制在下方统计卡片之上（同级 VStack 中
-                        // 后声明的视图默认覆盖先声明的，故抬高热力图层级）。
-                        .zIndex(1)
-                } else if isAwaitingLocalStats {
-                    skeletonHeatmap
-                }
-
-                if !isAccountsModuleHidden {
-                    providersSection
+                if let activeHeatmapTooltip {
+                    HeatmapFloatingTooltipLayer(
+                        presentation: activeHeatmapTooltip,
+                        containerSize: proxy.size
+                    )
+                    .id(activeHeatmapTooltip.identity)
+                    .zIndex(10_000)
                 }
             }
-            .padding()
+            .coordinateSpace(name: HeatmapTooltipCoordinateSpace.name)
+            .background(AppSurface.page(colorScheme))
         }
-        .background(AppSurface.page(colorScheme))
     }
 
     /// 订阅账号模块被隐藏（设置 → 侧边栏可见性）时，仪表盘的额度告警区随之消失。
@@ -134,11 +146,11 @@ struct DashboardView: View {
             brandAsset: spec.asset,
             accent: spec.accent,
             weeks: dashboardHeatmapWeeks,
-            onHoverStateChange: { isShowingTooltip in
-                if isShowingTooltip {
-                    activeHeatmapID = spec.id
-                } else if activeHeatmapID == spec.id {
-                    activeHeatmapID = nil
+            onTooltipChange: { presentation in
+                if let presentation {
+                    activeHeatmapTooltip = presentation
+                } else if activeHeatmapTooltip?.sourceID == spec.asset {
+                    activeHeatmapTooltip = nil
                 }
             }
         )
@@ -156,10 +168,8 @@ struct DashboardView: View {
             ForEach(heatmapSpecs) { spec in
                 heatmap(for: spec)
                     .frame(maxWidth: .infinity)
-                    .zIndex(activeHeatmapID == spec.id ? 1_000 : 0)
             }
         }
-        .zIndex(1)
     }
 
 
