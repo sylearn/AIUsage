@@ -45,6 +45,7 @@ private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
 // MARK: - Settings View
 
 struct SubscriptionGatewaySettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var manager: CLIProxyGatewayManager
     @ObservedObject var runtime: CLIProxyRuntimeController
     @ObservedObject private var navigation = CLIProxyGatewayNavigation.shared
@@ -99,7 +100,7 @@ struct SubscriptionGatewaySettingsView: View {
         }
         .frame(width: 168)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.28))
+        .background(AppSurface.sidebar(colorScheme))
     }
 
     private func categoryRow(_ category: GatewaySettingsCategory) -> some View {

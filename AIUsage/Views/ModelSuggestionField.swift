@@ -336,6 +336,7 @@ struct ModelSuggestionField: View {
 /// 仅用于需要把上游结果加入持久列表的编辑器（API 提供商 / OpenCode）。
 /// Claude 与 Codex 节点同步后直接合并到模型目录，不再展示重复的“已添加”列表。
 struct FetchedModelAppendList: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var state: ModelFetchState
     /// 当前已在列表中的模型（用于标记「已添加」并禁止重复添加）。
     let existingModels: Set<String>
@@ -436,7 +437,7 @@ struct FetchedModelAppendList: View {
             .padding(.leading, 5)
         }
         .frame(maxHeight: 220)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(AppSurface.card(colorScheme)))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1)))
     }
 

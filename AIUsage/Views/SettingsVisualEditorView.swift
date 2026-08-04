@@ -143,6 +143,7 @@ private struct SettingsCard<Content: View>: View {
     let title: String
     let icon: String
     @ViewBuilder let content: Content
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -153,7 +154,8 @@ private struct SettingsCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 }
 

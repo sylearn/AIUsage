@@ -93,7 +93,7 @@ extension ProviderAccountEditorView {
                     .padding(12)
                     .background(
                         RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .fill(AppSurface.card(colorScheme))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)

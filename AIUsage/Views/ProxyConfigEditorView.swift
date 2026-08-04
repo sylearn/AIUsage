@@ -87,6 +87,7 @@ struct ProxyConfigEditorView: View {
     @EnvironmentObject var viewModel: ProxyViewModel
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) var colorScheme
 
     // 注：部分 @State 为 internal（去掉 private），以便 JSON 标签页/定价子区拆分到
     // ProxyConfigEditorView+JSONTab.swift / +Pricing.swift 后仍可访问（Swift private 为文件级）。
@@ -511,7 +512,7 @@ struct ProxyConfigEditorView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     // MARK: - Anthropic Direct Section
@@ -539,7 +540,7 @@ struct ProxyConfigEditorView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     // MARK: - Network Section (OpenAI Proxy)
@@ -596,7 +597,7 @@ struct ProxyConfigEditorView: View {
 
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     @ViewBuilder private var upstreamCredentialsSection: some View {
@@ -629,7 +630,7 @@ struct ProxyConfigEditorView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     // MARK: - Model Configuration Section
@@ -641,7 +642,7 @@ struct ProxyConfigEditorView: View {
             maximumOutputSection
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     private var modelDiscoveryPanel: some View {
@@ -869,7 +870,7 @@ struct ProxyConfigEditorView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
     }
 
@@ -953,7 +954,7 @@ struct ProxyConfigEditorView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     // MARK: - Validation

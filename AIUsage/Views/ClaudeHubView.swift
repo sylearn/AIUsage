@@ -40,6 +40,7 @@ enum ClaudeHubTab: String, CaseIterable, Identifiable {
 /// runtimes plus independent Code, Desktop and Science product gateways.
 struct ClaudeHubView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DefaultsKey.claudeHubSelectedTab) private var selectedTabRawValue = ClaudeHubTab.desktop.rawValue
     private let initialTab: ClaudeHubTab?
 
@@ -69,7 +70,7 @@ struct ClaudeHubView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear {
             // The normal sidebar entry restores the last product. Legacy routes may
             // still request a specific product and become the new remembered value.
@@ -89,8 +90,12 @@ struct ClaudeHubView: View {
         .frame(maxWidth: 720, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .bottom) { Divider() }
+        .background(AppSurface.toolbar(colorScheme))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AppStroke.subtle(colorScheme))
+                .frame(height: 1)
+        }
     }
 
     private func productButton(_ tab: ClaudeHubTab) -> some View {
@@ -105,11 +110,11 @@ struct ClaudeHubView: View {
             HStack(spacing: 6) {
                 Image(systemName: tab.symbol)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(selected ? tab.tint : Color.secondary)
+                    .foregroundStyle(selected ? tab.tint : AppContent.secondary(colorScheme))
                     .frame(width: 20, height: 22)
                 Text(tab.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(AppContent.primary(colorScheme))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
@@ -118,7 +123,7 @@ struct ClaudeHubView: View {
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? tab.tint.opacity(0.10) : Color.primary.opacity(0.025))
+                    .fill(selected ? tab.tint.opacity(0.14) : AppSurface.chip(colorScheme))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -134,6 +139,7 @@ struct ClaudeHubView: View {
 /// Code owns only application configuration and its fixed product gateway.
 /// Node creation, runtime state and upstream credentials live in the Node tab.
 private struct ClaudeCodeRoutingView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var gateway = GlobalProxyManager.claude
     @ObservedObject private var proxyVM = ProxyViewModel.shared
     @State private var showSettingsEditor = false
@@ -171,7 +177,7 @@ private struct ClaudeCodeRoutingView: View {
             .padding(20)
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear {
             if selectedNodeID.isEmpty { selectedNodeID = resolvedNodeID ?? "" }
             reloadEffortLevel()
@@ -230,8 +236,8 @@ private struct ClaudeCodeRoutingView: View {
             effortControl
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStroke.card(colorScheme)))
     }
 
     private var effortControl: some View {
@@ -394,8 +400,8 @@ private struct ClaudeCodeRoutingView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     private var codeModelHelpPopover: some View {
@@ -437,6 +443,7 @@ struct ClaudeDesktopIntegrationView: View {
     @ObservedObject private var manager = ClaudeDesktopIntegrationManager.shared
     @ObservedObject private var gateway = GlobalProxyManager.desktop
     @ObservedObject private var proxyVM = ProxyViewModel.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedNodeID = ""
     @State private var showConnectionHelp = false
     @State private var showModelModeHelp = false
@@ -485,7 +492,7 @@ struct ClaudeDesktopIntegrationView: View {
             .padding(20)
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear {
             manager.refreshInstallation()
             if selectedNodeID.isEmpty { selectedNodeID = resolvedNodeID ?? "" }
@@ -798,8 +805,8 @@ struct ClaudeDesktopIntegrationView: View {
             )
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     private var modelManagerCompactButton: some View {
@@ -1036,6 +1043,7 @@ struct ClaudeDesktopIntegrationView: View {
 
 private struct ClaudeDesktopModelManagerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var gateway = GlobalProxyManager.desktop
     let node: ProxyConfiguration
 
@@ -1070,7 +1078,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
             footer
         }
         .frame(width: 720, height: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear {
             enabled1M = gateway.config.claudeDesktopSupports1MModels(for: node.id)
         }
@@ -1186,7 +1194,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .fill(AppSurface.card(colorScheme))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 13, style: .continuous)

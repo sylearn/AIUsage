@@ -7,6 +7,7 @@ struct ProviderAccountEditorView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     @StateObject var codexLogin = CodexLoginCoordinator()
     @StateObject var geminiLogin = GeminiLoginCoordinator()
     @StateObject var antigravityLogin = AntigravityLoginCoordinator()
@@ -178,7 +179,7 @@ struct ProviderAccountEditorView: View {
             width: editorWidth,
             height: editorHeight
         )
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear { refreshCandidates() }
         .onDisappear {
             sessionMonitorTask?.cancel()

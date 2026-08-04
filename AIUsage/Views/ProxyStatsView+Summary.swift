@@ -77,8 +77,8 @@ extension ProxyStatsView {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 14).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     // MARK: - Data Range Banner

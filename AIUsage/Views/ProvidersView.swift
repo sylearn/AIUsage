@@ -568,7 +568,7 @@ struct ProviderSearchControl: View {
         .frame(height: height)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.82 : 0.94))
+                .fill(AppSurface.elevated(colorScheme).opacity(colorScheme == .dark ? 0.82 : 1))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)

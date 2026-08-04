@@ -143,6 +143,7 @@ struct EditorCard<Content: View>: View {
     var title: String?
     var spacing: CGFloat = 12
     @ViewBuilder var content: () -> Content
+    @Environment(\.colorScheme) private var colorScheme
 
     init(_ title: String? = nil, spacing: CGFloat = 12, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
@@ -159,7 +160,8 @@ struct EditorCard<Content: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 }
 

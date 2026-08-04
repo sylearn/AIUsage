@@ -8,6 +8,7 @@ struct AccountNoteEditorView: View {
 
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var draftNote: String
 
     init(providerTitle: String, accountLabel: String, note: String?, onSave: @escaping (String?) -> Void) {
@@ -49,6 +50,6 @@ struct AccountNoteEditorView: View {
         }
         .padding(24)
         .frame(width: 460, height: 200)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
     }
 }

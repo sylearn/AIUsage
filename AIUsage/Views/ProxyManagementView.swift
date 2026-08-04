@@ -112,7 +112,7 @@ struct ProxyManagementView: View {
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .fileImporter(
             isPresented: $showingImporter,
             allowedContentTypes: [.json, .folder],

@@ -4,6 +4,7 @@ import QuotaBackend
 struct InboxView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
+    @Environment(\.colorScheme) private var colorScheme
     private var alerts: [Alert] {
         refreshCoordinator.overview?.alerts ?? []
     }
@@ -58,7 +59,7 @@ struct InboxView: View {
             }
             .padding()
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
     }
 
     private func sectionHeader(_ title: String, icon: String, color: Color, @ViewBuilder trailing: () -> some View = { EmptyView() }) -> some View {

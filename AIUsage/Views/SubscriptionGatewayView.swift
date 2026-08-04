@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SubscriptionGatewayView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var manager = CLIProxyGatewayManager.shared
     @StateObject private var runtime = CLIProxyRuntimeController.shared
     @ObservedObject private var navigation = CLIProxyGatewayNavigation.shared
@@ -24,7 +25,7 @@ struct SubscriptionGatewayView: View {
             sectionNavigation
             sectionContent
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .task {
             let currentSettings = runtime.settings
             settingsBase = currentSettings
@@ -195,12 +196,12 @@ struct SubscriptionGatewayView: View {
                                 .accessibilityLabel(L("Unsaved changes", "有未保存更改"))
                         }
                     }
-                    .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.78))
+                    .foregroundStyle(selected ? Color.white : AppContent.secondary(colorScheme))
                     .padding(.horizontal, 13)
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(selected ? section.accentColor : Color.primary.opacity(0.05))
+                            .fill(selected ? section.accentColor : AppSurface.chip(colorScheme))
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
@@ -212,9 +213,11 @@ struct SubscriptionGatewayView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .background(AppSurface.toolbar(colorScheme))
         .overlay(alignment: .bottom) {
-            Divider().opacity(0.5)
+            Rectangle()
+                .fill(AppStroke.subtle(colorScheme))
+                .frame(height: 1)
         }
     }
 

@@ -7,6 +7,7 @@ import AppKit
 
 struct ScienceProxyManagementView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var manager = ScienceProxyManager.shared
     @ObservedObject private var proxyVM = ProxyViewModel.shared
 
@@ -75,7 +76,7 @@ struct ScienceProxyManagementView: View {
             .padding(20)
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear(perform: syncFromConfig)
         .onChange(of: resolvedSelection) { _, _ in
             showAllModels = false
@@ -194,10 +195,10 @@ struct ScienceProxyManagementView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 16).fill(AppSurface.card(colorScheme)))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(isEnabled ? Self.brand.opacity(0.5) : Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(isEnabled ? Self.brand.opacity(0.5) : AppStroke.card(colorScheme), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: isEnabled)
     }
@@ -345,8 +346,8 @@ struct ScienceProxyManagementView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     private var modelCatalogHeader: some View {
@@ -520,8 +521,8 @@ struct ScienceProxyManagementView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     private var runningSettingsGrid: some View {

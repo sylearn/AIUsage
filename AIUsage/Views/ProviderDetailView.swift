@@ -85,7 +85,7 @@ struct ProviderDetailView: View {
             }
         }
         .frame(width: 420, height: 560)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .sheet(isPresented: $showingNoteEditor) {
             if let accountEntry {
                 AccountNoteEditorView(
@@ -244,7 +244,7 @@ struct ProviderDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(AppSurface.card(colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Windows Section
@@ -326,7 +326,7 @@ struct ProviderDetailView: View {
                     }
                     .padding(.vertical, 7)
                     .padding(.horizontal, 10)
-                    .background(Color(nsColor: .controlBackgroundColor))
+                    .background(AppSurface.card(colorScheme))
                     .cornerRadius(8)
                 }
             }
@@ -469,6 +469,7 @@ struct ProviderDetailView: View {
 
 struct QuotaWindowRow: View {
     let window: QuotaWindow
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isUnlimited: Bool {
         window.remainingPercent == nil
@@ -521,7 +522,7 @@ struct QuotaWindowRow: View {
                 .foregroundColor(.secondary)
         }
         .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(AppSurface.card(colorScheme))
         .cornerRadius(12)
     }
 
@@ -538,6 +539,7 @@ struct QuotaWindowRow: View {
 
 struct MetricCard: View {
     let metric: Metric
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -558,7 +560,7 @@ struct MetricCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(AppSurface.card(colorScheme))
         .cornerRadius(8)
     }
 }
@@ -567,6 +569,7 @@ struct CostPeriodCard: View {
     let label: String
     let period: CostPeriod
     @EnvironmentObject var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label)
@@ -592,7 +595,7 @@ struct CostPeriodCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(AppSurface.card(colorScheme))
         .cornerRadius(12)
     }
 }

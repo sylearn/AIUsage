@@ -78,6 +78,7 @@ final class CLIProxyGatewayNavigation: ObservableObject {
 struct GatewayCard<Content: View>: View {
     var padding: CGFloat = 22
     @ViewBuilder let content: Content
+    @Environment(\.colorScheme) private var colorScheme
 
     init(padding: CGFloat = 22, @ViewBuilder content: () -> Content) {
         self.padding = padding
@@ -90,12 +91,13 @@ struct GatewayCard<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.9))
+                    .fill(AppSurface.card(colorScheme))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                    .strokeBorder(AppStroke.card(colorScheme), lineWidth: 1)
             )
+            .shadow(color: AppShadow.card(colorScheme), radius: colorScheme == .dark ? 0 : 8, y: 3)
     }
 }
 
@@ -216,6 +218,7 @@ struct GatewayMetricCard: View {
     let detail: String
     let systemImage: String
     let tint: Color
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 11) {
@@ -243,11 +246,11 @@ struct GatewayMetricCard: View {
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(AppStroke.card(colorScheme), lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
     }

@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 
 // MARK: - App Surface Tokens
-// 浅色模式专用表面/描边/正文层级。避免 windowBackground ≈ controlBackground 的纯白叠纯白，
-// 以及 Color.primary.opacity(0.03–0.05) 在浅色几乎不可见的问题。深色保持现有层次。
+// 全局界面色阶。浅色模式采用低亮度雾蓝灰，降低大面积纯白带来的眩光；
+// 深色模式继续沿用系统材质，仅统一表面层级与描边语义。
 
 enum AppSurface {
-    /// 页面底：浅色略暖灰纸面，深色用系统窗口底。
+    /// 页面底：浅色为雾蓝灰工作台，深色用系统窗口底。
     static func page(_ scheme: ColorScheme) -> Color {
         switch scheme {
         case .dark:
@@ -14,8 +14,19 @@ enum AppSurface {
         case .light:
             fallthrough
         @unknown default:
-            // 略暖的纸面灰，减轻纯白晃眼。
-            return Color(red: 0.965, green: 0.961, blue: 0.953)
+            return Color(red: 0.941, green: 0.953, blue: 0.969)
+        }
+    }
+
+    /// 主侧栏与页面内二级导航，比页面底再沉一级。
+    static func sidebar(_ scheme: ColorScheme) -> Color {
+        switch scheme {
+        case .dark:
+            return Color(nsColor: .underPageBackgroundColor)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.902, green: 0.925, blue: 0.953)
         }
     }
 
@@ -27,7 +38,19 @@ enum AppSurface {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.995, green: 0.993, blue: 0.988)
+            return Color(red: 0.982, green: 0.988, blue: 0.996)
+        }
+    }
+
+    /// 浮层与输入区域；只在需要比卡片再高一级时使用。
+    static func elevated(_ scheme: ColorScheme) -> Color {
+        switch scheme {
+        case .dark:
+            return Color.white.opacity(0.075)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.996, green: 0.998, blue: 1.0)
         }
     }
 
@@ -39,7 +62,7 @@ enum AppSurface {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.925, green: 0.918, blue: 0.908)
+            return Color(red: 0.890, green: 0.918, blue: 0.953)
         }
     }
 
@@ -51,13 +74,32 @@ enum AppSurface {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.945, green: 0.940, blue: 0.932)
+            return Color(red: 0.922, green: 0.941, blue: 0.965)
         }
     }
 
-    /// 工具栏与页面同色带，避免再叠一层白。
+    /// 工具栏略高于页面底，但不回到刺眼纯白。
     static func toolbar(_ scheme: ColorScheme) -> Color {
-        page(scheme)
+        switch scheme {
+        case .dark:
+            return page(scheme)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.957, green: 0.969, blue: 0.982)
+        }
+    }
+
+    /// 选中菜单和聚焦区域的低饱和蓝底。
+    static func selection(_ scheme: ColorScheme) -> Color {
+        switch scheme {
+        case .dark:
+            return Color.accentColor.opacity(0.18)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.835, green: 0.890, blue: 0.965)
+        }
     }
 }
 
@@ -69,7 +111,7 @@ enum AppStroke {
         case .light:
             fallthrough
         @unknown default:
-            return Color.black.opacity(0.10)
+            return Color(red: 0.745, green: 0.788, blue: 0.847)
         }
     }
 
@@ -80,7 +122,18 @@ enum AppStroke {
         case .light:
             fallthrough
         @unknown default:
-            return Color.black.opacity(0.08)
+            return Color(red: 0.816, green: 0.851, blue: 0.898)
+        }
+    }
+
+    static func strong(_ scheme: ColorScheme) -> Color {
+        switch scheme {
+        case .dark:
+            return Color.white.opacity(0.16)
+        case .light:
+            fallthrough
+        @unknown default:
+            return Color(red: 0.655, green: 0.714, blue: 0.792)
         }
     }
 }
@@ -94,7 +147,7 @@ enum AppContent {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.12, green: 0.11, blue: 0.10)
+            return Color(red: 0.090, green: 0.129, blue: 0.200)
         }
     }
 
@@ -106,7 +159,7 @@ enum AppContent {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.38, green: 0.36, blue: 0.34)
+            return Color(red: 0.310, green: 0.373, blue: 0.467)
         }
     }
 
@@ -118,13 +171,34 @@ enum AppContent {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.52, green: 0.50, blue: 0.47)
+            return Color(red: 0.435, green: 0.498, blue: 0.588)
         }
+    }
+}
+
+enum AppAccent {
+    static func control(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color.accentColor
+            : Color(red: 0.216, green: 0.408, blue: 0.741)
+    }
+}
+
+enum AppShadow {
+    static func card(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color.black.opacity(0.22)
+            : Color(red: 0.16, green: 0.23, blue: 0.34).opacity(0.08)
     }
 }
 
 extension View {
     func appPageBackground(_ scheme: ColorScheme) -> some View {
         background(AppSurface.page(scheme))
+    }
+
+    func appPageChrome(_ scheme: ColorScheme) -> some View {
+        foregroundStyle(AppContent.primary(scheme))
+            .background(AppSurface.page(scheme))
     }
 }

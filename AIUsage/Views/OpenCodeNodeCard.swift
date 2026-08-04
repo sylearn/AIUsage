@@ -9,6 +9,7 @@ import QuotaBackend
 // Equatable 化：输入不变的卡片跳过重渲染（选中态切换只重渲染两张卡）。
 
 struct OpenCodeNodeCard: View, Equatable {
+    @Environment(\.colorScheme) private var colorScheme
     let node: OpenCodeNode
     let isActive: Bool
     /// 「仅代理」运行中（本地代理进程在跑但未接管 opencode.json）。
@@ -212,14 +213,14 @@ struct OpenCodeNodeCard: View, Equatable {
         if isActive { return brand.opacity(0.06) }
         if isProxyOnlyRunning { return Color.purple.opacity(0.04) }
         if isSelected { return brand.opacity(0.04) }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.5)
+        return AppSurface.card(colorScheme)
     }
 
     private var cardBorderColor: Color {
         if isActive { return brand.opacity(0.5) }
         if isProxyOnlyRunning { return Color.purple.opacity(0.4) }
         if isSelected { return brand.opacity(0.25) }
-        return Color.primary.opacity(0.06)
+        return AppStroke.card(colorScheme)
     }
 
     // MARK: - Protocol Badge

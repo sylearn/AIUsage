@@ -7,9 +7,10 @@ extension SettingsView {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.title3.weight(.bold))
+                    .foregroundStyle(AppContent.primary(colorScheme))
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppContent.secondary(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -19,23 +20,25 @@ extension SettingsView {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 24)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.94))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
+        .shadow(color: AppShadow.card(colorScheme), radius: colorScheme == .dark ? 0 : 12, y: 5)
     }
 
     func settingsBlock<Content: View>(title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppContent.primary(colorScheme))
 
             if let subtitle {
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppContent.secondary(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -49,9 +52,10 @@ extension SettingsView {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppContent.primary(colorScheme))
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppContent.secondary(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -67,10 +71,11 @@ extension SettingsView {
         HStack {
             Text(title)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppContent.primary(colorScheme))
             Spacer()
             Text(value)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppContent.secondary(colorScheme))
         }
     }
 }

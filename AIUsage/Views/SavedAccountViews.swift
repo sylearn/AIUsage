@@ -128,11 +128,11 @@ struct SavedAccountCard: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color.white.opacity(0.055) : Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
         .onTapGesture { showingDetail = true }
         .contextMenu {
@@ -193,6 +193,7 @@ struct SavedAccountDetailView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingNoteEditor = false
     @State private var showingRemovalAlert = false
     @State private var isRefreshing = false
@@ -253,7 +254,11 @@ struct SavedAccountDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(AppSurface.card(colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(AppStroke.subtle(colorScheme), lineWidth: 1)
+                )
 
                 Label(
                     hasSecureCredential
@@ -334,7 +339,7 @@ struct SavedAccountDetailView: View {
             .padding(.bottom, 16)
         }
         .frame(width: 400, height: 320)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .sheet(isPresented: $showingNoteEditor) {
             AccountNoteEditorView(
                 providerTitle: account.providerTitle,

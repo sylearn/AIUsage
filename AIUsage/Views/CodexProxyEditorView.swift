@@ -10,6 +10,7 @@ struct CodexProxyEditorView: View {
     @EnvironmentObject var viewModel: ProxyViewModel
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var profile: NodeProfile
     @State private var isNew: Bool
@@ -397,7 +398,7 @@ struct CodexProxyEditorView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     private func modelTextField(text: Binding<String>, placeholder: String) -> some View {

@@ -62,11 +62,11 @@ extension SettingsView {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 }

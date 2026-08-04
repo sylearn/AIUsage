@@ -8,6 +8,7 @@ import SwiftUI
 
 struct OpenCodeGlobalConfigSection: View {
     @ObservedObject var store: OpenCodeNodeStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingEditor = false
 
     private var keyCount: Int { store.globalConfig.settings.count }
@@ -64,11 +65,11 @@ struct OpenCodeGlobalConfigSection: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
         .sheet(isPresented: $showingEditor) {
             OpenCodeGlobalConfigEditorView(store: store)

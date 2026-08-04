@@ -132,8 +132,8 @@ extension ProxyStatsView {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 18).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     /// 模型分布/详情当前视图回显：时间段 · 口径（非代理轨只显示 Tokens 口径）。
@@ -202,8 +202,8 @@ extension ProxyStatsView {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 18).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     func tableColumnWidth(_ column: TableColumn, layout: InsightsLayout) -> CGFloat {

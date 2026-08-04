@@ -10,6 +10,7 @@ import SwiftUI
 // GlobalProxyChipMenu / GlobalProxySummaryChip / GlobalProxyField / GlobalProxyInlineLabel / GlobalProxyTip。
 
 struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
     let brand: Color
     let title: String
     let subtitle: String
@@ -58,11 +59,11 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke((isEnabled || isRuntimeOwnedByAnotherConsumer) ? brand.opacity(0.45) : Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke((isEnabled || isRuntimeOwnedByAnotherConsumer) ? brand.opacity(0.45) : AppStroke.card(colorScheme), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: isEnabled)
         .animation(.easeInOut(duration: 0.18), value: isConfigurationExpanded)
@@ -301,6 +302,7 @@ struct ClaudeProductGatewayCard<
     Message: View
 >: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     let brand: Color
     let systemImage: String
@@ -359,11 +361,11 @@ struct ClaudeProductGatewayCard<
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .stroke(isEnabled ? brand.opacity(0.42) : Color.primary.opacity(0.065), lineWidth: 1)
+                .stroke(isEnabled ? brand.opacity(0.42) : AppStroke.card(colorScheme), lineWidth: 1)
         )
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -1196,6 +1198,7 @@ struct ClaudeModelRouteBoard: View {
 }
 
 private struct ClaudeRouteModelPicker: View {
+    @Environment(\.colorScheme) private var colorScheme
     let route: ClaudeAppModelRoute
     let brand: Color
     let catalog: [String]
@@ -1241,7 +1244,7 @@ private struct ClaudeRouteModelPicker: View {
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 34)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(AppSurface.elevated(colorScheme)))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(brand.opacity(isOpen ? 0.48 : 0.16), lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }

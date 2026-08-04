@@ -53,7 +53,7 @@ struct AppFlashBanner: View {
         case .light:
             fallthrough
         @unknown default:
-            return Color(red: 0.99, green: 0.985, blue: 0.978)
+            return AppSurface.elevated(colorScheme)
         }
     }
 

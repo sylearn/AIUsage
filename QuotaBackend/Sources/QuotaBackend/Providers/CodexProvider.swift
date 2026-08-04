@@ -654,6 +654,9 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         var result = RawQuotaWindow()
         result.usedPercent = usedPercent
         result.remainingPercent = max(0, 100 - usedPercent)
+        result.label = Self.windowLabel(
+            forLimitSeconds: (window["limit_window_seconds"] as? NSNumber)?.doubleValue
+        )
 
         if let resetAtRaw = window["reset_at"] as? Double, resetAtRaw > 0 {
             let resetDate = Date(timeIntervalSince1970: resetAtRaw)
@@ -661,6 +664,24 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             result.resetDescription = formatResetDescription(resetDate)
         }
         return result
+    }
+
+    /// OpenAI may temporarily move a remaining quota window into `primary_window`.
+    /// The reported duration is therefore the source of truth, not its position.
+    static func windowLabel(forLimitSeconds seconds: Double?) -> String? {
+        guard let seconds, seconds > 0 else { return nil }
+
+        let totalSeconds = Int(seconds.rounded())
+        let minute = 60
+        let hour = 60 * minute
+        let day = 24 * hour
+        let week = 7 * day
+
+        if totalSeconds == week { return "Weekly Window" }
+        if totalSeconds.isMultiple(of: day) { return "\(totalSeconds / day)d Window" }
+        if totalSeconds.isMultiple(of: hour) { return "\(totalSeconds / hour)h Window" }
+        if totalSeconds.isMultiple(of: minute) { return "\(totalSeconds / minute)m Window" }
+        return "Quota Window"
     }
 
     private func formatResetDescription(_ date: Date) -> String {

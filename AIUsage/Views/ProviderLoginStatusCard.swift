@@ -33,6 +33,7 @@ struct ProviderLoginAction {
 // 5 个服务商登录区共用的统一卡片：顶部状态行（含状态指示与操作按钮）+ 信息卡片（说明 / 设备码 / 账号徽标）。
 
 struct ProviderLoginStatusCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let state: ProviderLoginVisualState
     let title: String
     let description: String
@@ -151,7 +152,11 @@ struct ProviderLoginStatusCard: View {
         .frame(maxWidth: .infinity, minHeight: cardMinHeight, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 

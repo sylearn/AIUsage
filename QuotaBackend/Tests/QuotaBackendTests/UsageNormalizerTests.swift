@@ -122,6 +122,31 @@ final class UsageNormalizerTests: XCTestCase {
         XCTAssertEqual(overview.alerts.last?.id, "provider-5:status-watch")
     }
 
+    func testCodexWindowLabelUsesReportedDurationInsteadOfWindowPosition() {
+        XCTAssertEqual(CodexProvider.windowLabel(forLimitSeconds: 5 * 60 * 60), "5h Window")
+        XCTAssertEqual(CodexProvider.windowLabel(forLimitSeconds: 7 * 24 * 60 * 60), "Weekly Window")
+        XCTAssertEqual(CodexProvider.windowLabel(forLimitSeconds: 24 * 60 * 60), "1d Window")
+        XCTAssertNil(CodexProvider.windowLabel(forLimitSeconds: nil))
+    }
+
+    func testCodexNormalizerPreservesReportedPrimaryWindowLabel() {
+        var weeklyWindow = RawQuotaWindow()
+        weeklyWindow.usedPercent = 20
+        weeklyWindow.remainingPercent = 80
+        weeklyWindow.label = "Weekly Window"
+
+        var usage = ProviderUsage(provider: "codex", label: "Codex")
+        usage.accountPlan = "Business"
+        usage.primary = weeklyWindow
+
+        let summary = UsageNormalizer.normalize(
+            provider: CodexProvider(homeDirectory: "/tmp/aiusage-codex-window-label-test"),
+            usage: usage
+        )
+
+        XCTAssertEqual(summary.windows.map(\.label), ["Weekly Window"])
+    }
+
     private func makeSummary(
         id: String,
         providerId: String,

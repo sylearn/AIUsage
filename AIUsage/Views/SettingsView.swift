@@ -60,6 +60,7 @@ struct SettingsView: View {
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var sparkle: SparkleController
+    @Environment(\.colorScheme) var colorScheme
     @State var hideDockIcon = UserDefaults.standard.bool(forKey: DefaultsKey.hideDockIcon)
     /// 关窗后保持后台运行（issue #31）。缺省 true，与隐藏 Dock 解耦。
     @State var keepRunningInBackground = UserDefaults.standard.object(forKey: DefaultsKey.keepRunningInBackground) as? Bool ?? true
@@ -204,7 +205,7 @@ struct SettingsView: View {
 
                 Text(L("Your AI workspace", "你的 AI 工作台"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppContent.secondary(colorScheme))
             }
 
             Spacer()
@@ -212,14 +213,14 @@ struct SettingsView: View {
             // 「检查更新」入口统一收敛到「软件更新」设置卡片（含自动更新开关），此处只留版本标签。
             Label(L("Version", "版本") + " " + appVersion, systemImage: "tag")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppContent.secondary(colorScheme))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background(Capsule().fill(Color.primary.opacity(0.06)))
+                .background(Capsule().fill(AppSurface.chip(colorScheme)))
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(AppSurface.toolbar(colorScheme))
     }
 
     // MARK: - Sidebar
@@ -234,7 +235,7 @@ struct SettingsView: View {
             .padding(10)
         }
         .frame(width: 180)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .background(AppSurface.sidebar(colorScheme))
     }
 
     private func settingsCategoryRow(_ category: SettingsCategory) -> some View {
@@ -251,7 +252,7 @@ struct SettingsView: View {
 
                 Text(category.title)
                     .font(.system(size: 13, weight: selectedCategory == category ? .semibold : .regular))
-                    .foregroundStyle(selectedCategory == category ? .white : .primary)
+                    .foregroundStyle(selectedCategory == category ? .white : AppContent.primary(colorScheme))
 
                 Spacer()
             }
@@ -259,7 +260,7 @@ struct SettingsView: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(selectedCategory == category ? Color.accentColor : Color.clear)
+                    .fill(selectedCategory == category ? AppAccent.control(colorScheme) : Color.clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
@@ -300,9 +301,9 @@ struct SettingsView: View {
     var settingsBackground: some View {
         LinearGradient(
             colors: [
-                Color(nsColor: .windowBackgroundColor),
-                Color.accentColor.opacity(0.06),
-                Color(nsColor: .windowBackgroundColor)
+                AppSurface.page(colorScheme),
+                AppSurface.selection(colorScheme).opacity(colorScheme == .dark ? 0.18 : 0.42),
+                AppSurface.page(colorScheme)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing

@@ -6,8 +6,8 @@ extension UsageNormalizer {
 
     static func normalizeCodex(base: inout ProviderSummary, usage: ProviderUsage) -> ProviderSummary {
         var windows: [WindowInfo] = []
-        if let w = usage.primary   { windows.append(createPercentWindow(label: "5h Window", window: w)) }
-        if let w = usage.secondary { windows.append(createPercentWindow(label: "Weekly Window", window: w)) }
+        if let w = usage.primary   { windows.append(createPercentWindow(label: w.label ?? "5h Window", window: w)) }
+        if let w = usage.secondary { windows.append(createPercentWindow(label: w.label ?? "Weekly Window", window: w)) }
         if let w = usage.tertiary  { windows.append(createPercentWindow(label: "Code Review", window: w)) }
 
         let remainingPercent = pickSmallestRemaining(windows)

@@ -12,6 +12,7 @@ struct WebLoginView: View {
     let onComplete: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
     @State private var isLoading = true
     @State private var currentURL: URL?
@@ -66,7 +67,7 @@ struct WebLoginView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(AppSurface.toolbar(colorScheme))
 
             Divider()
 

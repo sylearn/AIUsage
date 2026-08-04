@@ -64,12 +64,13 @@ struct CostTrackingCard: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 22)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 22)
-                .stroke(color.opacity(colorScheme == .dark ? 0.24 : 0.14), lineWidth: 1)
+                .stroke(colorScheme == .dark ? color.opacity(0.24) : AppStroke.card(colorScheme), lineWidth: 1)
         )
+        .shadow(color: AppShadow.card(colorScheme), radius: colorScheme == .dark ? 0 : 10, y: 4)
         .contentShape(RoundedRectangle(cornerRadius: 22))
         .onTapGesture { showingDetail = true }
         .sheet(isPresented: $showingDetail) {

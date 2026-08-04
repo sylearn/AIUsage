@@ -44,7 +44,7 @@ extension ProxyConfigEditorView {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
     }
 
     private func sourceLegend(_ label: String, _ color: Color) -> some View {

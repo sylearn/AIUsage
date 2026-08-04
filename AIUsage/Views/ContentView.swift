@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @EnvironmentObject var sparkle: SparkleController
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var proxyVM = ProxyViewModel.shared
     private var sectionBinding: Binding<AppSection> {
         Binding(
@@ -133,6 +134,9 @@ struct ContentView: View {
                 ForEach(visibleSecondary) { navRow($0) }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(AppSurface.sidebar(colorScheme))
+            .foregroundStyle(AppContent.primary(colorScheme))
             .frame(minWidth: 200)
             .navigationTitle("AIUsage")
             .onChange(of: hiddenSections) { _, hidden in
@@ -193,7 +197,10 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppSurface.page(colorScheme).ignoresSafeArea())
         }
+        .tint(AppAccent.control(colorScheme))
+        .background(AppSurface.page(colorScheme).ignoresSafeArea())
         .task {
             await appState.performStartupFlowIfNeeded()
         }
@@ -243,6 +250,7 @@ struct ContentView: View {
 private struct SidebarFooterView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var sparkle: SparkleController
+    @Environment(\.colorScheme) private var colorScheme
     @State private var pulse = false
 
     private var appVersion: String {
@@ -271,6 +279,7 @@ private struct SidebarFooterView: View {
         .padding(.top, 6)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppSurface.sidebar(colorScheme))
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: sparkle.availableUpdateVersion)
     }
 

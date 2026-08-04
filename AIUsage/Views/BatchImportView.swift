@@ -10,6 +10,7 @@ struct BatchImportView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var scannedFiles: [ScannedAuthFile] = []
     @State private var selectedIds: Set<String> = []
@@ -41,7 +42,7 @@ struct BatchImportView: View {
         .padding(24)
         .frame(width: 520)
         .frame(minHeight: 220, maxHeight: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
     }
 
     // MARK: - Header
@@ -180,7 +181,7 @@ struct BatchImportView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(selectedIds.contains(file.id)
                       ? Color.accentColor.opacity(0.08)
-                      : Color(nsColor: .controlBackgroundColor))
+                      : AppSurface.card(colorScheme))
         )
         .contentShape(Rectangle())
         .onTapGesture { toggleSelection(file) }
@@ -199,7 +200,7 @@ struct BatchImportView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppSurface.card(colorScheme)))
     }
 
     // MARK: - Action Bar

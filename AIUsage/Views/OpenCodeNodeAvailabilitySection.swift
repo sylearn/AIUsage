@@ -9,6 +9,7 @@ import QuotaBackend
 struct OpenCodeNodeAvailabilitySection: View {
     let node: OpenCodeNode
     @ObservedObject var proxyRuntime: OpenCodeProxyRuntime
+    @Environment(\.colorScheme) private var colorScheme
 
     /// 按上游模型聚合的可用率 / 延迟信号。全部来自现有 ProxyRequestLog，无额外埋点。
     private struct ModelStat: Identifiable {
@@ -80,11 +81,11 @@ struct OpenCodeNodeAvailabilitySection: View {
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 18)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(AppSurface.card(colorScheme))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                    .stroke(AppStroke.card(colorScheme), lineWidth: 1)
             )
         }
     }

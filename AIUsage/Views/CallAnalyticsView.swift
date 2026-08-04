@@ -8,6 +8,7 @@ import QuotaBackend
 
 struct CallAnalyticsView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.colorScheme) var colorScheme
     @StateObject var store = CallAnalyticsStore.shared
 
     @AppStorage("callAnalytics.range") private var windowRaw = CallWindow.month.rawValue
@@ -155,6 +156,7 @@ struct CallAnalyticsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .appPageChrome(colorScheme)
         .task(id: rangeSpec.rangeKey) {
             let spec = rangeSpec
             await store.refreshIfNeeded(rangeKey: spec.rangeKey, cutoff: spec.cutoff, end: spec.end)
@@ -184,11 +186,11 @@ struct CallAnalyticsView: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 
@@ -399,7 +401,8 @@ struct CallAnalyticsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     // MARK: - Daily trend
@@ -682,7 +685,8 @@ struct CallAnalyticsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     static func color(for source: CallSourceKind) -> Color {

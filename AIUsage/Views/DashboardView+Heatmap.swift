@@ -207,8 +207,8 @@ struct LocalTokenUsageHeatmap: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 18).fill(AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppStroke.card(colorScheme), lineWidth: 1))
     }
 
     // MARK: - Header
@@ -499,12 +499,12 @@ struct LocalTokenUsageHeatmap: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(AppSurface.elevated(colorScheme))
                 .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.6 : 0.18), radius: 16, y: 6)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.10), lineWidth: 0.5)
+                .stroke(AppStroke.strong(colorScheme), lineWidth: 0.5)
         )
     }
 

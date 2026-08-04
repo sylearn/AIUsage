@@ -9,6 +9,7 @@ private let globalConfigLog = Logger(subsystem: "com.aiusage.desktop", category:
 
 struct GlobalConfigSection: View {
     @EnvironmentObject var viewModel: ProxyViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingEditor = false
 
     private var store: NodeProfileStore { viewModel.profileStore }
@@ -66,11 +67,11 @@ struct GlobalConfigSection: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
         .sheet(isPresented: $showingEditor) {
             GlobalConfigEditorView(store: store)

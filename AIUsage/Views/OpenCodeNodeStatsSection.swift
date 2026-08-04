@@ -15,6 +15,7 @@ struct OpenCodeOverviewStrip: View {
     @ObservedObject var store: OpenCodeNodeStore
     @ObservedObject var statsStore: OpenCodeNodeStatsStore
     @ObservedObject var proxyRuntime: OpenCodeProxyRuntime
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let totals = aggregateTotals()
@@ -112,11 +113,11 @@ struct OpenCodeOverviewStrip: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 }
@@ -127,6 +128,7 @@ struct OpenCodeNodeStatisticsSection: View {
     let node: OpenCodeNode
     @ObservedObject var statsStore: OpenCodeNodeStatsStore
     @ObservedObject var proxyRuntime: OpenCodeProxyRuntime
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let dbStats = statsStore.stats(for: node)
@@ -248,11 +250,11 @@ struct OpenCodeNodeStatisticsSection: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 
@@ -305,6 +307,7 @@ struct OpenCodeNodeRecentRequestsSection: View {
     let node: OpenCodeNode
     @ObservedObject var statsStore: OpenCodeNodeStatsStore
     @ObservedObject var proxyRuntime: OpenCodeProxyRuntime
+    @Environment(\.colorScheme) private var colorScheme
 
     private static let rowLimit = 10
 
@@ -377,11 +380,11 @@ struct OpenCodeNodeRecentRequestsSection: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 

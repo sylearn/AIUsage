@@ -64,6 +64,7 @@ struct CodexSubscriptionSection: View {
     @ObservedObject private var proxyVM = ProxyViewModel.shared
     @ObservedObject private var globalProxy = GlobalProxyManager.shared
     @ObservedObject private var orderStore = CodexSubscriptionOrderStore.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     // 手势驱动的实时重排状态：仅记录被拖行 id 与跟手位移，行高由 PreferenceKey 测量。
     @State private var draggingId: String?
@@ -119,11 +120,11 @@ struct CodexSubscriptionSection: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
         .onPreferenceChange(SubscriptionRowHeightKey.self) { heights in
             guard draggingId != nil, rowHeights != heights else { return }
@@ -381,6 +382,7 @@ private struct SubscriptionRowHeightKey: PreferenceKey {
 // 实时 ~/.codex/config.toml 文件入口统一放在 ProxyManagementView 顶部工具栏。
 
 struct CodexGlobalConfigSection: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var store = NodeProfileStore.shared
     @State private var showingFragmentEditor = false
 
@@ -447,11 +449,11 @@ struct CodexGlobalConfigSection: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 }

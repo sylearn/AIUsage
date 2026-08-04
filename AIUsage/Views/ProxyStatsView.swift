@@ -9,6 +9,7 @@ import QuotaBackend
 struct ProxyStatsView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
+    @Environment(\.colorScheme) var colorScheme
 
     // 统一控制台口径：metric（费用/Tokens）与 period（今日/本周/本月/全部）全页共用，均持久化。
     @AppStorage(DefaultsKey.proxyStatsMetric) var metric: StatMetric = .cost
@@ -160,7 +161,7 @@ struct ProxyStatsView: View {
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onChange(of: familyRaw) { _, _ in
             pruneSelectedModels()
         }
@@ -213,11 +214,11 @@ struct ProxyStatsView: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(AppSurface.card(colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 

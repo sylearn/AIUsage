@@ -24,6 +24,7 @@ struct ClaudeNodeUsage: Equatable {
 /// When `selectedConfigId` changes, only the previously-selected and newly-selected cards re-render;
 /// the rest are skipped entirely. Same optimization applies during drag-and-drop state changes.
 struct ConfigurationCardView: View, Equatable {
+    @Environment(\.colorScheme) private var colorScheme
     let config: ProxyConfiguration
     let isActive: Bool
     let isProxyOnlyRunning: Bool
@@ -300,14 +301,14 @@ struct ConfigurationCardView: View, Equatable {
         if isActive { return brandColor.opacity(0.06) }
         if isProxyOnlyRunning { return Self.nodeRuntimeBrand.opacity(0.04) }
         if isSelected { return brandColor.opacity(0.04) }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.5)
+        return AppSurface.card(colorScheme)
     }
 
     private var cardBorderColor: Color {
         if isActive { return brandColor.opacity(0.5) }
         if isProxyOnlyRunning { return Self.nodeRuntimeBrand.opacity(0.35) }
         if isSelected { return brandColor.opacity(0.25) }
-        return Color.primary.opacity(0.06)
+        return AppStroke.card(colorScheme)
     }
 
     // MARK: - Connectivity Test

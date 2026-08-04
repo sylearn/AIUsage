@@ -92,7 +92,7 @@ struct ProviderPickerView: View {
             footer
         }
         .frame(minWidth: 720, idealWidth: 840, minHeight: 520, idealHeight: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .appPageChrome(colorScheme)
         .onAppear {
             switch mode {
             case .initialSetup:
@@ -332,10 +332,10 @@ struct ProviderPickerView: View {
         .padding(.vertical, 13)
         .background(
             Rectangle()
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(AppSurface.toolbar(colorScheme))
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.35 : 0.55))
+                        .fill(AppStroke.subtle(colorScheme))
                         .frame(height: 0.5)
                 }
         )
@@ -424,11 +424,11 @@ struct ProviderPickerView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.72 : 0.92))
+                .fill(AppSurface.card(colorScheme).opacity(colorScheme == .dark ? 0.72 : 1))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.04), lineWidth: 1)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
     }
 
@@ -645,11 +645,11 @@ private struct SourceSelectionCard: View {
     }
 
     private var cardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.05) : Color(nsColor: .controlBackgroundColor)
+        AppSurface.card(colorScheme)
     }
 
     private var borderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06)
+        AppStroke.card(colorScheme)
     }
 
     private func pill(text: String, tint: Color) -> some View {
