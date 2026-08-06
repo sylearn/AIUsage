@@ -25,11 +25,13 @@
 </p>
 
 <p align="center">
-  <sup>赞助商</sup><br>
-  <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="180">
+  <sub>开发者 API 合作伙伴</sub><br><br>
+  <a href="https://api-models.com/sign-up?aff=mfLW">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104">
   </a><br>
-  <sub>统一 AI API · 低价按量计费 · 独立状态监控 · 支持多种渠道支付</sub>
+  <strong>一套 API 接入 OpenAI、Anthropic 与 Gemini</strong><br>
+  <sub>低价按量计费 · 独立状态监控 · 支持多种渠道支付</sub><br><br>
+  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>注册并获取 API →</strong></a>
 </p>
 
 <p align="center">
@@ -266,13 +268,13 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 ## 赞助商
 
 <p align="center">
-  <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="180">
+  <a href="https://api-models.com/sign-up?aff=mfLW">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://api-models.com"><strong>API Models</strong></a> —— 面向开发者的高性价比统一 AI 模型 API。<br>
+  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>API Models</strong></a> —— 面向开发者的高性价比统一 AI 模型 API。<br>
   一套账户接入 OpenAI 兼容、Anthropic Messages 与 Gemini 接口，并提供实用接入文档和独立状态监控。<br>
   低价按量计费，支持多种渠道支付。
 </p>
@@ -282,6 +284,10 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
   <img alt="价格" src="https://img.shields.io/badge/%E4%BB%B7%E6%A0%BC-%E4%BD%8E%E4%BB%B7%E6%8C%89%E9%87%8F%E8%AE%A1%E8%B4%B9-22c55e?style=flat-square">
   <img alt="可用性" src="https://img.shields.io/badge/%E5%8F%AF%E7%94%A8%E6%80%A7-%E7%8B%AC%E7%AB%8B%E7%8A%B6%E6%80%81%E7%9B%91%E6%8E%A7-0ea5e9?style=flat-square">
   <img alt="支付" src="https://img.shields.io/badge/%E6%94%AF%E4%BB%98-%E5%A4%9A%E7%A7%8D%E6%B8%A0%E9%81%93-f59e0b?style=flat-square">
+</p>
+
+<p align="center">
+  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>创建账户并获取 API →</strong></a>
 </p>
 
 ## 支持作者

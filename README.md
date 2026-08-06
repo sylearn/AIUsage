@@ -25,11 +25,13 @@
 </p>
 
 <p align="center">
-  <sup>Sponsored by</sup><br>
-  <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="180">
+  <sub>DEVELOPER API PARTNER</sub><br><br>
+  <a href="https://api-models.com/sign-up?aff=mfLW">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104">
   </a><br>
-  <sub>Unified AI APIs · Cost-effective pay-as-you-go · Independently monitored · Multiple payment methods</sub>
+  <strong>One API for OpenAI, Anthropic &amp; Gemini</strong><br>
+  <sub>Low-cost pay-as-you-go · Independently monitored · Multiple payment methods</sub><br><br>
+  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>Get API access →</strong></a>
 </p>
 
 <p align="center">
@@ -266,13 +268,13 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 ## Sponsor
 
 <p align="center">
-  <a href="https://api-models.com">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="180">
+  <a href="https://api-models.com/sign-up?aff=mfLW">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://api-models.com"><strong>API Models</strong></a> — cost-effective access to leading AI models through one API service.<br>
+  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>API Models</strong></a> — cost-effective access to leading AI models through one API service.<br>
   OpenAI-compatible, Anthropic Messages and Gemini endpoints, with practical integration guides and independent uptime monitoring.<br>
   Low-cost pay-as-you-go pricing with multiple payment methods.
 </p>
@@ -282,6 +284,10 @@ Product inspiration and implementation references include [`CodexBar`](https://g
   <img alt="Pricing" src="https://img.shields.io/badge/Pricing-low--cost%20pay--as--you--go-22c55e?style=flat-square">
   <img alt="Availability" src="https://img.shields.io/badge/Availability-independently%20monitored-0ea5e9?style=flat-square">
   <img alt="Payments" src="https://img.shields.io/badge/Payments-multiple%20methods-f59e0b?style=flat-square">
+</p>
+
+<p align="center">
+  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>Create an account and get API access →</strong></a>
 </p>
 
 ## Support the Author
