@@ -50,7 +50,6 @@
 - [调用分析](#调用分析)
 - [致谢](#致谢)
 - [赞助商](#赞助商)
-- [支持作者](#支持作者)
 - [许可证](#许可证)
 
 ## 功能
@@ -288,14 +287,6 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>创建账户并获取 API →</strong></a>
-</p>
-
-## 支持作者
-
-如果 AIUsage 对你有帮助，欢迎请作者喝一杯咖啡。你的支持会帮助项目持续维护与改进。
-
-<p align="center">
-  <img src="docs/images/donate-qrcode.jpg" alt="打赏二维码" width="220">
 </p>
 
 ## 友链

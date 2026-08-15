@@ -510,39 +510,12 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     }
 
     private func resolveUsageURL() throws -> URL {
-        let configPath = "\(homeDirectory)/.codex/config.toml"
-        var baseURL = Self.defaultBaseURL
-        if let content = try? String(contentsOfFile: configPath, encoding: .utf8) {
-            // The AIUsage Codex proxy injects `[model_providers.aiusage-proxy]`
-            // with `base_url = http://127.0.0.1:4319/v1`. That is the local proxy
-            // host, NOT the ChatGPT usage host — picking it up here would point the
-            // account usage request at the proxy (or its upstream) and 404. Skip
-            // that managed block while still honoring any other base override.
-            let managedSection = "[model_providers.\(Self.proxyProviderId)]"
-            var inManagedSection = false
-            for line in content.components(separatedBy: "\n") {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("[") {
-                    inManagedSection = trimmed.hasPrefix(managedSection)
-                    continue
-                }
-                if inManagedSection { continue }
-                for key in ["apiBaseUrl", "api_base_url", "base_url"] where trimmed.lowercased().hasPrefix(key.lowercased()) && trimmed.contains("=") {
-                    let value = trimmed
-                        .components(separatedBy: "=")
-                        .dropFirst()
-                        .joined(separator: "=")
-                        .trimmingCharacters(in: .init(charactersIn: " \t\"'"))
-                    if value.hasPrefix("http") {
-                        baseURL = value
-                        break
-                    }
-                }
-            }
-        }
-        let path = baseURL.contains("/backend-api") ? "wham/usage" : "api/codex/usage"
-        let normalized = baseURL.hasSuffix("/") ? baseURL : baseURL + "/"
-        guard let url = URL(string: "\(normalized)\(path)") else {
+        try Self.resolveUsageEndpointURL(homeDirectory: homeDirectory)
+    }
+
+    /// ChatGPT subscription quota endpoint. Never derived from Codex inference `base_url`.
+    static func resolveUsageEndpointURL(homeDirectory _: String) throws -> URL {
+        guard let url = URL(string: "\(Self.defaultBaseURL)wham/usage") else {
             throw ProviderError("invalid_url", "Codex usage URL is invalid.")
         }
         return url

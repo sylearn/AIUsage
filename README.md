@@ -50,7 +50,6 @@
 - [Call Analytics](#call-analytics)
 - [Acknowledgements](#acknowledgements)
 - [Sponsor](#sponsor)
-- [Support the Author](#support-the-author)
 - [License](#license)
 
 ## Features
@@ -288,14 +287,6 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>Create an account and get API access →</strong></a>
-</p>
-
-## Support the Author
-
-If AIUsage helps you, consider buying the author a coffee. Your support helps keep the project maintained and improved.
-
-<p align="center">
-  <img src="docs/images/donate-qrcode.jpg" alt="Donation QR code" width="220">
 </p>
 
 ## Friendly Links
