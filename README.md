@@ -27,9 +27,9 @@
 <p align="center">
   <sub>DEVELOPER API PARTNER</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104" style="border-radius: 12px;">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104">
   </a><br>
-  <strong>One API for OpenAI, Anthropic &amp; Gemini</strong><br>
+  <strong>Every frontier model. One API.</strong><br>
   <sub>Low-cost pay-as-you-go · Free usage credits on sign-up · Independently monitored · Multiple payment methods</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>Get API access →</strong></a>
 </p>
@@ -268,7 +268,7 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132" style="border-radius: 12px;">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
   </a>
 </p>
 

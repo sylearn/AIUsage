@@ -27,9 +27,9 @@
 <p align="center">
   <sub>开发者 API 合作伙伴</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104" style="border-radius: 12px;">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104">
   </a><br>
-  <strong>一套 API 接入 OpenAI、Anthropic 与 Gemini</strong><br>
+  <strong>前沿模型，一套 API。</strong><br>
   <sub>低价按量计费 · 注册即享免费额度 · 独立状态监控 · 支持多种渠道支付</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>注册并获取 API →</strong></a>
 </p>
@@ -268,7 +268,7 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132" style="border-radius: 12px;">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
   </a>
 </p>
 
