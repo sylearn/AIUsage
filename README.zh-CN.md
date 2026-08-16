@@ -27,10 +27,10 @@
 <p align="center">
   <sub>开发者 API 合作伙伴</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104" style="border-radius: 12px;">
   </a><br>
   <strong>一套 API 接入 OpenAI、Anthropic 与 Gemini</strong><br>
-  <sub>低价按量计费 · 独立状态监控 · 支持多种渠道支付</sub><br><br>
+  <sub>低价按量计费 · 注册即享免费额度 · 独立状态监控 · 支持多种渠道支付</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>注册并获取 API →</strong></a>
 </p>
 
@@ -268,14 +268,14 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132" style="border-radius: 12px;">
   </a>
 </p>
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>API Models</strong></a> —— 面向开发者的高性价比统一 AI 模型 API。<br>
   一套账户接入 OpenAI 兼容、Anthropic Messages 与 Gemini 接口，并提供实用接入文档和独立状态监控。<br>
-  低价按量计费，支持多种渠道支付。
+  低价按量计费，支持多种渠道支付。新用户注册即送免费使用额度。
 </p>
 
 <p align="center">

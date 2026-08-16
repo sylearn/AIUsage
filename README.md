@@ -27,10 +27,10 @@
 <p align="center">
   <sub>DEVELOPER API PARTNER</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="104" style="border-radius: 12px;">
   </a><br>
   <strong>One API for OpenAI, Anthropic &amp; Gemini</strong><br>
-  <sub>Low-cost pay-as-you-go · Independently monitored · Multiple payment methods</sub><br><br>
+  <sub>Low-cost pay-as-you-go · Free usage credits on sign-up · Independently monitored · Multiple payment methods</sub><br><br>
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>Get API access →</strong></a>
 </p>
 
@@ -268,14 +268,14 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
+    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132" style="border-radius: 12px;">
   </a>
 </p>
 
 <p align="center">
   <a href="https://api-models.com/sign-up?aff=mfLW"><strong>API Models</strong></a> — cost-effective access to leading AI models through one API service.<br>
   OpenAI-compatible, Anthropic Messages and Gemini endpoints, with practical integration guides and independent uptime monitoring.<br>
-  Low-cost pay-as-you-go pricing with multiple payment methods.
+  Low-cost pay-as-you-go pricing with multiple payment methods. New accounts include free usage credits.
 </p>
 
 <p align="center">
