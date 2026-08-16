@@ -69,22 +69,8 @@ extension CodexCostProvider {
         }
 
         var snapshot = CodexUsageSnapshot()
-        var seenSessions = Set<String>()
         for file in files {
             let metadata = metadataByFile[file]
-            if let sessionId = metadata?.sessionId {
-                guard seenSessions.insert(sessionId).inserted else {
-                    if filesToParse.contains(file), let fingerprint = fingerprintsByFile[file] {
-                        parsedUpdates[file] = CodexParsedFile(
-                            fingerprint: fingerprint,
-                            metadata: metadata,
-                            aggregate: CodexFileAggregate(sessionId: metadata?.sessionId),
-                            snapshots: nil
-                        )
-                    }
-                    continue
-                }
-            }
             let fileAggregate: CodexFileAggregate
             if filesToParse.contains(file) {
                 fileAggregate = parseFile(file, metadata: metadata, inheritedTotals: inheritedTotals)

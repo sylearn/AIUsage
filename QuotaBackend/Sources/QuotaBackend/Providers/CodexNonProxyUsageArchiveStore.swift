@@ -17,7 +17,7 @@ private let codexNonProxyArchiveLog = Logger(subsystem: "com.aiusage.quotabacken
 // 复用 CodexUsageArchive 结构（历史不重算，按 fullHistoryImportedAt 标记一次性全量冻结）。
 
 actor CodexNonProxyUsageArchiveStore {
-    static let artifactVersion = 1
+    static let artifactVersion = 2
     private static let legacySubSourceSuffix = " (Sub)"
     private static let legacyApiSourceSuffix = " (API)"
 
@@ -97,18 +97,50 @@ actor CodexNonProxyUsageArchiveStore {
             return migrated
         }
 
+        if Self.artifactVersion > 1,
+           let decoded = decodeArchive(
+            at: Self.legacyFileURL(homeDirectory: homeDirectory, version: Self.artifactVersion - 1),
+            expectedVersion: Self.artifactVersion - 1
+           ) {
+            let migrated = sanitizeArchive(decoded)
+            archives[homeDirectory] = migrated
+            save(homeDirectory, migrated)
+            return migrated
+        }
+
         let fresh = CodexUsageArchive(version: Self.artifactVersion, updatedAt: "", days: [:])
         archives[homeDirectory] = fresh
         return fresh
     }
 
-    private func decodeArchive(at url: URL) -> CodexUsageArchive? {
+    private func decodeArchive(at url: URL, expectedVersion: Int? = nil) -> CodexUsageArchive? {
+        let version = expectedVersion ?? Self.artifactVersion
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(CodexUsageArchive.self, from: data),
-              decoded.version == Self.artifactVersion else {
+              decoded.version == version else {
             return nil
         }
         return decoded
+    }
+
+    private func save(_ homeDirectory: String, _ archive: CodexUsageArchive) {
+        let normalized = CodexUsageArchive(
+            version: Self.artifactVersion,
+            updatedAt: archive.updatedAt,
+            days: archive.days,
+            fullHistoryImportedAt: archive.fullHistoryImportedAt
+        )
+        let url = Self.fileURL(homeDirectory: homeDirectory)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(normalized)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            codexNonProxyArchiveLog.warning("Failed to save Codex non-proxy usage archive: \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func archiveNeedsSanitization(_ archive: CodexUsageArchive) -> Bool {
@@ -173,29 +205,15 @@ actor CodexNonProxyUsageArchiveStore {
         return nil
     }
 
-    private func save(_ homeDirectory: String, _ archive: CodexUsageArchive) {
-        let url = Self.fileURL(homeDirectory: homeDirectory)
-        do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONEncoder().encode(archive)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            codexNonProxyArchiveLog.warning("Failed to save Codex non-proxy usage archive: \(String(describing: error), privacy: .public)")
-        }
-    }
-
     static func fileURL(homeDirectory: String) -> URL {
         let dir = (homeDirectory as NSString).appendingPathComponent(".config/aiusage/usage-archive")
         return URL(fileURLWithPath: dir, isDirectory: true)
             .appendingPathComponent("codex-non-proxy-usage-v\(artifactVersion).json")
     }
 
-    static func legacyFileURL(homeDirectory: String) -> URL {
+    static func legacyFileURL(homeDirectory: String, version: Int = artifactVersion) -> URL {
         let dir = (homeDirectory as NSString).appendingPathComponent(".config/aiusage/usage-archive")
         return URL(fileURLWithPath: dir, isDirectory: true)
-            .appendingPathComponent("codex-subscription-usage-v\(artifactVersion).json")
+            .appendingPathComponent("codex-subscription-usage-v\(version).json")
     }
 }

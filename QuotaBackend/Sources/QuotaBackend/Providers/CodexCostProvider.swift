@@ -27,7 +27,7 @@ public struct CodexCostProvider: ProviderFetcher {
     static let fileScanCache = CodexCostFileScanCache()
     /// 非代理轨永久归档（账号无关、每个 home 一张）。代理轨直接读代理用量归档文件。
     static let nonProxyArchive = CodexNonProxyUsageArchiveStore()
-    static let scanCacheSchemaVersion = 4
+    static let scanCacheSchemaVersion = 5
     static let defaultScanDays = 30
     static let filenameDateRegex = try? NSRegularExpression(pattern: "(\\d{4}-\\d{2}-\\d{2})")
 

@@ -88,7 +88,10 @@ struct APIProviderEditorView: View {
             Divider()
             footer
         }
-        .frame(width: 760, height: 820)
+        // Match other multi-section editor sheets: cap height so header/footer stay
+        // reachable on smaller displays; ScrollView absorbs overflow.
+        .frame(minWidth: 640, idealWidth: 760, maxWidth: 800,
+               minHeight: 480, idealHeight: 660, maxHeight: 680)
         .onChange(of: draft.format) { _, newFormat in
             selectedTargets = selectedTargets.filter { $0.supports(newFormat) }
         }

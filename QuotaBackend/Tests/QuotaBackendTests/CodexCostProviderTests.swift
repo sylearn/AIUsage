@@ -120,6 +120,50 @@ final class CodexCostProviderTests: XCTestCase {
         XCTAssertEqual(breakdown.outputTokens, 30)
     }
 
+    func testIncludesAllModelsWhenMultipleRolloutsShareSessionId() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        let sharedSessionId = "shared-task-session"
+        let solTs = SharedFormatters.iso8601String(from: now.addingTimeInterval(-120))
+        let lunaTs = SharedFormatters.iso8601String(from: now.addingTimeInterval(-60))
+
+        // Lexicographically first file only contains Sol; a later rollout adds Luna.
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": solTs, "payload": ["id": sharedSessionId]],
+            ["type": "turn_context", "timestamp": solTs, "payload": ["model": "gpt-5.6-sol"]],
+            tokenCountLine(solTs, input: 100, cached: 20, output: 10)
+        ], to: sessionDir.appendingPathComponent("aaa-sol-rollout.jsonl"))
+
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": lunaTs, "payload": ["id": sharedSessionId]],
+            ["type": "turn_context", "timestamp": lunaTs, "payload": ["model": "gpt-5.6-luna"]],
+            tokenCountLine(lunaTs, input: 50, cached: 10, output: 5)
+        ], to: sessionDir.appendingPathComponent("zzz-luna-rollout.jsonl"))
+
+        let provider = makeProvider(home: tempRoot)
+        let usage = try await provider.fetchUsage()
+        let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(summary.costSummary?.overall?.tokens, 165)
+        let models = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall?.map(\.model).sorted())
+        XCTAssertEqual(models, ["gpt-5.6-luna (Non-Proxy)", "gpt-5.6-sol (Non-Proxy)"])
+
+        let sol = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall?.first { $0.model == "gpt-5.6-sol (Non-Proxy)" })
+        XCTAssertEqual(sol.inputTokens, 80)
+        XCTAssertEqual(sol.cacheReadTokens, 20)
+        XCTAssertEqual(sol.outputTokens, 10)
+
+        let luna = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall?.first { $0.model == "gpt-5.6-luna (Non-Proxy)" })
+        XCTAssertEqual(luna.inputTokens, 40)
+        XCTAssertEqual(luna.cacheReadTokens, 10)
+        XCTAssertEqual(luna.outputTokens, 5)
+    }
+
     func testTokenCountModelOverridesPreviousTurnContext() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -437,7 +481,7 @@ final class CodexCostProviderTests: XCTestCase {
 
         let now = Date()
         let archivedDayKey = utcDayKey(now.addingTimeInterval(-86_400))
-        let legacyURL = CodexNonProxyUsageArchiveStore.legacyFileURL(homeDirectory: tempRoot.path)
+        let legacyURL = CodexNonProxyUsageArchiveStore.legacyFileURL(homeDirectory: tempRoot.path, version: 1)
         try FileManager.default.createDirectory(at: legacyURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let legacyPayload: [String: Any] = [
             "version": 1,
