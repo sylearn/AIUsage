@@ -475,15 +475,11 @@ extension ProviderRefreshCoordinator {
         incoming: ProviderData?,
         existing: ProviderData?
     ) -> ProviderData? {
-        if let incoming, incoming.status != .error {
-            return incoming
-        }
-
-        if let existing, existing.status != .error {
-            return existing
-        }
-
-        return incoming ?? existing
+        // A completed refresh must be able to replace the on-screen card,
+        // including when the new result is an error. Keeping a previous
+        // healthy card here made Codex look like bulk refresh did nothing.
+        if let incoming { return incoming }
+        return existing
     }
 
     func deduplicatedProvidersByID(_ providers: [ProviderData]) -> [ProviderData] {

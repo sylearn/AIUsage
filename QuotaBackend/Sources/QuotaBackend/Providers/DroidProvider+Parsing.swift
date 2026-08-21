@@ -4,6 +4,82 @@ import Foundation
 
 extension DroidProvider {
     func parseResponse(authInfo: [String: Any], usageInfo: [String: Any], auth: DroidAuth) -> ProviderUsage {
+        if let billingLimits = usageInfo["billingLimits"] as? [String: Any] {
+            return parseBillingLimitsResponse(authInfo: authInfo, billingLimits: billingLimits, auth: auth)
+        }
+        return parseLegacyUsageResponse(authInfo: authInfo, usageInfo: usageInfo, auth: auth)
+    }
+
+    func parseBillingLimitsResponse(
+        authInfo: [String: Any],
+        billingLimits: [String: Any],
+        auth: DroidAuth
+    ) -> ProviderUsage {
+        let claims = parseJWTClaims(auth.bearerToken ?? "")
+        let userInfo = (authInfo["user"] as? [String: Any]) ?? (authInfo["userProfile"] as? [String: Any])
+        let org = authInfo["organization"] as? [String: Any]
+        let subscription = org?["subscription"] as? [String: Any]
+        let orbSub = subscription?["orbSubscription"] as? [String: Any]
+        let orbPlan = orbSub?["plan"] as? [String: Any]
+        let planName = (subscription?["planName"] as? String)
+            ?? (orbPlan?["name"] as? String)
+            ?? (orbSub?["planName"] as? String)
+            ?? (orbSub?["name"] as? String)
+            ?? (subscription?["factoryTier"] as? String)
+            ?? ""
+
+        let pools = billingLimits["limits"] as? [String: Any] ?? [:]
+        let standard = pools["standard"] as? [String: Any] ?? [:]
+        let fiveHour = parseBillingWindow(standard["fiveHour"] as? [String: Any], label: "5h Window")
+        let weekly = parseBillingWindow(standard["weekly"] as? [String: Any], label: "Weekly Window")
+        let monthly = parseBillingWindow(standard["monthly"] as? [String: Any], label: "Monthly Window")
+
+        var usage = ProviderUsage(provider: "droid", label: "Droid")
+        usage.accountEmail = (claims["email"] as? String) ?? (userInfo?["email"] as? String)
+        usage.usageAccountId = (claims["sub"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? (userInfo?["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? usage.accountEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        usage.source = auth.source
+        usage.primary = fiveHour
+        usage.secondary = weekly
+        usage.tertiary = monthly
+
+        usage.extra["planName"] = AnyCodable(planName)
+        usage.extra["organizationName"] = AnyCodable(org?["name"] as? String ?? "")
+        usage.extra["billingModel"] = AnyCodable("rate-limits")
+        if let cents = intValue(billingLimits["extraUsageBalanceCents"]) {
+            usage.extra["extraUsageBalanceCents"] = AnyCodable(cents)
+        }
+        if let preference = (billingLimits["overagePreference"] as? String)?.nilIfBlank {
+            usage.extra["overagePreference"] = AnyCodable(preference)
+        }
+        return usage
+    }
+
+    func parseBillingWindow(_ value: [String: Any]?, label: String) -> RawQuotaWindow? {
+        guard let value, let usedPercent = doubleValue(value["usedPercent"]) else { return nil }
+        var window = RawQuotaWindow()
+        let clampedUsed = min(100, max(0, usedPercent))
+        window.usedPercent = clampedUsed
+        window.remainingPercent = max(0, 100 - clampedUsed)
+        window.label = label
+        if let resetDate = parseWindowEnd(value["windowEnd"]) {
+            window.resetAt = SharedFormatters.iso8601String(from: resetDate)
+            window.resetDescription = formatResetDescription(resetDate)
+        }
+        return window
+    }
+
+    func parseWindowEnd(_ value: Any?) -> Date? {
+        switch value {
+        case let string as String:
+            return SharedFormatters.parseISO8601(string) ?? parseFactoryDate(string)
+        default:
+            return parseFactoryDate(value)
+        }
+    }
+
+    func parseLegacyUsageResponse(authInfo: [String: Any], usageInfo: [String: Any], auth: DroidAuth) -> ProviderUsage {
         let claims = parseJWTClaims(auth.bearerToken ?? "")
         let usageData = usageInfo["usage"] as? [String: Any] ?? [:]
         // /api/app/auth/me 现版返回的是 `userProfile`（旧版/部分场景为 `user`），两者都兜住。

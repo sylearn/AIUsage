@@ -226,7 +226,7 @@ struct SubscriptionGatewaySettingsView: View {
                         }
                         Spacer()
                         Button(L("Check", "检查")) {
-                            Task { await manager.checkForUpdates() }
+                            Task { await manager.checkForUpdates(force: true) }
                         }
                         .disabled(manager.operation.isBusy)
                         Button(primaryUpdateActionTitle) {

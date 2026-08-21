@@ -27,6 +27,9 @@ nonisolated struct CLIProxyPaths: Sendable {
     var configURL: URL { root.appendingPathComponent("config.yaml", isDirectory: false) }
     var stateURL: URL { root.appendingPathComponent("state.json", isDirectory: false) }
     var syncManifestURL: URL { root.appendingPathComponent("account-sync-manifest.json", isDirectory: false) }
+    /// Cached GitHub `releases/latest` payload + ETag, so opening the CPA page
+    /// does not burn the unauthenticated 60 req/hour budget.
+    var githubReleaseCacheURL: URL { root.appendingPathComponent("github-latest-release.json", isDirectory: false) }
     var binaryName: String { "CLIProxyAPI" }
 
     func versionDirectory(_ version: String) throws -> URL {

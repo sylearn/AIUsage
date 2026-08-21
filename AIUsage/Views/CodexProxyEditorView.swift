@@ -81,7 +81,10 @@ struct CodexProxyEditorView: View {
             Divider()
             footerBar
         }
-        .frame(width: 750, height: 800)
+        // Cap height so header/footer stay reachable on smaller displays;
+        // ScrollView absorbs overflow.
+        .frame(minWidth: 640, idealWidth: 760, maxWidth: 800,
+               minHeight: 480, idealHeight: 660, maxHeight: 680)
         .sheet(isPresented: $isPricingEditorPresented) {
             pricingRulesSheet
         }

@@ -179,14 +179,26 @@ public struct ClaudeProxyConfiguration: Sendable {
 
     private func mapTierRouteToUpstream(_ requestModel: String) -> String {
         let normalized = requestModel.lowercased()
-        if normalized == ScienceModelProtocolAdapter.defaultRouteID {
-            return defaultModel ?? middleModel
-        } else if normalized.contains("opus") {
+        if mapDesktopTierRoutes, let tier = ScienceModelProtocolAdapter.productTier(for: normalized) {
+            switch tier {
+            case .defaultRoute:
+                return defaultModel ?? middleModel
+            case .opus:
+                return bigModel
+            case .sonnet:
+                return middleModel
+            case .haiku:
+                return smallModel
+            }
+        }
+        if normalized.contains("opus") {
             return bigModel
         } else if normalized.contains("sonnet") {
             return middleModel
         } else if normalized.contains("haiku") {
             return smallModel
+        } else if normalized.contains("fable") {
+            return defaultModel ?? middleModel
         } else if normalized.contains("claude") {
             return middleModel
         }

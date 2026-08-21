@@ -1949,6 +1949,7 @@ nonisolated enum CLIProxyGatewayError: LocalizedError {
     case missingDigest
     case network(String)
     case invalidHTTPStatus(Int)
+    case githubRateLimited(resetAt: Date?)
     case checksumMismatch(expected: String, actual: String)
     case unsafeArchive(String)
     case extractionFailed(String)
@@ -1980,6 +1981,7 @@ nonisolated enum CLIProxyGatewayError: LocalizedError {
         case .missingDigest: "The selected release asset does not include a valid SHA-256 digest."
         case .network(let reason): "CLIProxyAPI update request failed: \(reason)"
         case .invalidHTTPStatus(let status): "CLIProxyAPI update server returned HTTP \(status)."
+        case .githubRateLimited: "GitHub API rate limit reached. Unauthenticated clients get about 60 requests per hour; try again later."
         case .checksumMismatch(let expected, let actual):
             "CLIProxyAPI checksum mismatch (expected \(expected), got \(actual))."
         case .unsafeArchive(let reason): "Unsafe CLIProxyAPI archive: \(reason)"
@@ -1997,7 +1999,8 @@ nonisolated enum CLIProxyGatewayError: LocalizedError {
         case .secretStorage(let reason): "CLIProxyAPI secret storage failed: \(reason)"
         case .configuration(let reason): "CLIProxyAPI configuration failed: \(reason)"
         case .process(let reason): "CLIProxyAPI process failed: \(reason)"
-        case .managementAPI(let status, let reason): "CLIProxyAPI Management API returned HTTP \(status): \(reason)"
+        case .managementAPI(_, let reason):
+            reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "unknown error" : reason
         case .invalidResponse(let reason): "CLIProxyAPI returned an invalid response: \(reason)"
         case .unsupportedAccount(let reason): "This account cannot be synchronized to CLIProxyAPI: \(reason)"
         case .invalidAuthFile(let reason): "Invalid CLIProxyAPI auth file: \(reason)"

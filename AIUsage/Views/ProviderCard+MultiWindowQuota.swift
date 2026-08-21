@@ -1,20 +1,36 @@
 import SwiftUI
 import QuotaBackend
 
-// MARK: - Multi-Window Quota View (Codex dual progress)
+// MARK: - Multi-Window Quota View
+// Codex / Kimi / MiniMax 默认展示两条；Droid Individual 展示 5 小时 / 周 / 月三条。
 
 struct MultiWindowQuotaView: View {
     let windows: [QuotaWindow]
     let accentColor: Color
+    var visibleWindowLimit: Int = 2
 
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+
+    private var displayedWindows: [QuotaWindow] {
+        Array(windows.prefix(visibleWindowLimit))
+    }
+
+    private var ringSize: CGFloat {
+        displayedWindows.count >= 3 ? 52 : 62
+    }
+
+    private var ringSpacing: CGFloat {
+        displayedWindows.count >= 3 ? 12 : 20
+    }
+
     private func windowLabel(_ label: String) -> String {
         guard appState.language == "zh" else { return label }
         switch label {
-        case "5h Window":      return "5小时剩余"
-        case "Weekly Window":  return "7天剩余"
+        case "5h Window", "5-hour": return "5小时剩余"
+        case "Weekly Window", "Weekly": return "7天剩余"
+        case "Monthly Window", "Monthly": return "月限额剩余"
         case "Code Review":    return "代码审查"
         case "Rate Limit":     return "频限明细"
         default:               return label
@@ -36,7 +52,7 @@ struct MultiWindowQuotaView: View {
 
     private var barLayout: some View {
         VStack(spacing: 10) {
-            ForEach(windows.prefix(2)) { window in
+            ForEach(displayedWindows) { window in
                 MultiWindowBarRow(window: window, label: windowLabel(window.label), accentColor: accentColor)
                     .environmentObject(appState)
                     .environmentObject(settings)
@@ -47,9 +63,14 @@ struct MultiWindowQuotaView: View {
     // MARK: - Ring Layout
 
     private var ringLayout: some View {
-        HStack(spacing: 20) {
-            ForEach(windows.prefix(2)) { window in
-                MultiWindowRingItem(window: window, label: windowLabel(window.label), accentColor: accentColor)
+        HStack(spacing: ringSpacing) {
+            ForEach(displayedWindows) { window in
+                MultiWindowRingItem(
+                    window: window,
+                    label: windowLabel(window.label),
+                    accentColor: accentColor,
+                    ringSize: ringSize
+                )
                     .environmentObject(appState)
                     .environmentObject(settings)
             }
@@ -61,7 +82,7 @@ struct MultiWindowQuotaView: View {
 
     private var segmentsLayout: some View {
         VStack(spacing: 10) {
-            ForEach(windows.prefix(2)) { window in
+            ForEach(displayedWindows) { window in
                 MultiWindowSegmentsRow(window: window, label: windowLabel(window.label), accentColor: accentColor)
                     .environmentObject(appState)
                     .environmentObject(settings)
@@ -175,6 +196,7 @@ struct MultiWindowRingItem: View {
     let window: QuotaWindow
     let label: String
     let accentColor: Color
+    var ringSize: CGFloat = 62
 
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var settings: AppSettings
@@ -233,10 +255,10 @@ struct MultiWindowRingItem: View {
                     .rotationEffect(.degrees(-90))
 
                 Text(displayText)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: ringSize >= 62 ? 15 : 12, weight: .bold, design: .rounded))
                     .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .topLeading, endPoint: .bottomTrailing))
             }
-            .frame(width: 62, height: 62)
+            .frame(width: ringSize, height: ringSize)
 
             Text(label)
                 .font(.caption.weight(.medium))

@@ -11,7 +11,10 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         }
         let models: [Model]
     }
-    private struct APIErrorResponse: Decodable { let error: String? }
+    private struct APIErrorResponse: Decodable {
+        let error: String?
+        let message: String?
+    }
     private struct PluginsResponse: Decodable {
         let pluginsEnabled: Bool
         let plugins: [CLIProxyPlugin]
@@ -225,7 +228,8 @@ nonisolated struct CLIProxyManagementClient: Sendable {
             query: sourceID.flatMap { value in
                 let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 return normalized.isEmpty ? nil : [URLQueryItem(name: "source", value: normalized)]
-            } ?? []
+            } ?? [],
+            timeout: 120
         )
         return response.restartRequired ?? false
     }
@@ -364,9 +368,17 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         path: String,
         query: [URLQueryItem] = [],
         headers: [String: String] = [:],
-        body: Data? = nil
+        body: Data? = nil,
+        timeout: TimeInterval = 30
     ) async throws -> T {
-        let data = try await requestData(method: method, path: path, query: query, headers: headers, body: body)
+        let data = try await requestData(
+            method: method,
+            path: path,
+            query: query,
+            headers: headers,
+            body: body,
+            timeout: timeout
+        )
         if T.self == EmptyResponse.self, data.isEmpty { return EmptyResponse() as! T }
         return try decode(T.self, from: data)
     }
@@ -413,12 +425,13 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         path: String,
         query: [URLQueryItem] = [],
         headers: [String: String] = [:],
-        body: Data? = nil
+        body: Data? = nil,
+        timeout: TimeInterval = 30
     ) async throws -> Data {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw CLIProxyGatewayError.configuration("invalid Management API URL") }
-        var request = URLRequest(url: url, timeoutInterval: 30)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         request.httpBody = body
         request.setValue("Bearer \(managementKey)", forHTTPHeaderField: "Authorization")
@@ -440,10 +453,7 @@ nonisolated struct CLIProxyManagementClient: Sendable {
             throw CLIProxyGatewayError.invalidResponse("missing HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(APIErrorResponse.self, from: data).error)
-                ?? String(data: data, encoding: .utf8)
-                ?? "unknown error"
-            throw CLIProxyGatewayError.managementAPI(http.statusCode, message)
+            throw CLIProxyGatewayError.managementAPI(http.statusCode, Self.managementErrorDetail(from: data))
         }
     }
 
@@ -473,6 +483,18 @@ nonisolated struct CLIProxyManagementClient: Sendable {
             throw CLIProxyGatewayError.configuration("invalid plugin provider identifier")
         }
         return normalized
+    }
+
+    private static func managementErrorDetail(from data: Data) -> String {
+        if let decoded = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
+            let code = decoded.error?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = decoded.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !detail.isEmpty { return detail }
+            if !code.isEmpty { return code }
+        }
+        let raw = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "unknown error" : raw
     }
 }
 

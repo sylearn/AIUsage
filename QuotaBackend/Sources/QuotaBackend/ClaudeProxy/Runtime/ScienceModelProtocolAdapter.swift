@@ -37,19 +37,47 @@ public struct ScienceModelProtocolAdapter: Sendable {
 
     /// Some Science releases accept only Claude-shaped model IDs.
     static let generatedIDPrefix = "claude-aiusage-v1-"
-    public static let defaultRouteID = "claude-aiusage"
-    public static let opusRouteID = "claude-aiusage-opus"
-    public static let sonnetRouteID = "claude-aiusage-sonnet"
-    public static let haikuRouteID = "claude-aiusage-haiku"
+    /// Desktop infers Effort / Thinking from Claude family SKUs
+    /// (`claude-opus-*`, `claude-sonnet-*`, `claude-haiku-*`, `claude-fable-*`).
+    /// Compact `claude-aiusage*` IDs pass the third-party blacklist but never
+    /// match that capability table, so the product routes use current Desktop
+    /// menu SKUs. `claude-sonnet-4-6` remains a Sonnet alias so already-open
+    /// sessions keep mapping to the Sonnet tier after the sonnet-5 cutover.
+    public static let defaultRouteID = "claude-fable-5"
+    public static let opusRouteID = "claude-opus-5"
+    public static let sonnetRouteID = "claude-sonnet-5"
+    public static let haikuRouteID = "claude-haiku-4-5"
+
+    public static let previousSonnetRouteID = "claude-sonnet-4-6"
+    public static let legacyDefaultRouteID = "claude-aiusage"
+    public static let legacyOpusRouteID = "claude-aiusage-opus"
+    public static let legacySonnetRouteID = "claude-aiusage-sonnet"
+    public static let legacyHaikuRouteID = "claude-aiusage-haiku"
+
+    public enum ProductTier: Sendable {
+        case defaultRoute
+        case opus
+        case sonnet
+        case haiku
+    }
+
+    public static func productTier(for model: String) -> ProductTier? {
+        switch model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case defaultRouteID, legacyDefaultRouteID:
+            return .defaultRoute
+        case opusRouteID, legacyOpusRouteID:
+            return .opus
+        case sonnetRouteID, previousSonnetRouteID, legacySonnetRouteID:
+            return .sonnet
+        case haikuRouteID, legacyHaikuRouteID:
+            return .haiku
+        default:
+            return nil
+        }
+    }
 
     public static func isStableProductTierRoute(_ model: String) -> Bool {
-        [
-            defaultRouteID,
-            opusRouteID,
-            sonnetRouteID,
-            haikuRouteID,
-        ]
-            .contains(model)
+        productTier(for: model) != nil
     }
 
     /// Prevents Science's display-only `Internal` heuristic from matching.
@@ -231,12 +259,12 @@ public struct ScienceModelProtocolAdapter: Sendable {
     }
 
     private static func productPresentationName(for model: String) -> String {
-        switch model {
-        case defaultRouteID: return "AIUsage"
-        case opusRouteID: return "AIUsage Opus"
-        case sonnetRouteID: return "AIUsage Sonnet"
-        case haikuRouteID: return "AIUsage Haiku"
-        default: return model
+        switch productTier(for: model) {
+        case .defaultRoute: return "AIUsage"
+        case .opus: return "AIUsage Opus"
+        case .sonnet: return "AIUsage Sonnet"
+        case .haiku: return "AIUsage Haiku"
+        case .none: return model
         }
     }
 

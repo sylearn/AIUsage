@@ -75,8 +75,11 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         var proactiveRefreshFailure: ProviderError?
         if !creds.isApiKeyMode, creds.needsRefresh, let refreshToken = creds.refreshToken {
             do {
-                effectiveCreds = try await refreshCredentials(creds, refreshToken: refreshToken)
-                if let path = credentialPath { persistRefreshedCredentials(effectiveCreds, to: path) }
+                effectiveCreds = try await refreshCredentials(
+                    creds,
+                    refreshToken: refreshToken,
+                    persistTo: credentialRefreshPaths(credentialPath: credentialPath, sourcePath: credential.metadata["sourcePath"])
+                )
             } catch let refreshError as ProviderError {
                 // A managed copy may hold a refresh token that another Codex
                 // session already rotated. Keep the precise failure, but still
@@ -107,8 +110,11 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
                !effectiveCreds.isApiKeyMode,
                let refreshToken = effectiveCreds.refreshToken ?? creds.refreshToken {
                 do {
-                    let refreshed = try await refreshCredentials(effectiveCreds, refreshToken: refreshToken)
-                    if let path = credentialPath { persistRefreshedCredentials(refreshed, to: path) }
+                    let refreshed = try await refreshCredentials(
+                        effectiveCreds,
+                        refreshToken: refreshToken,
+                        persistTo: credentialRefreshPaths(credentialPath: credentialPath, sourcePath: credential.metadata["sourcePath"])
+                    )
                     refreshedCredentials = refreshed
                 } catch let refreshError as ProviderError {
                     credentialFailure = refreshError
@@ -199,9 +205,12 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         var effective = sourceCreds
         if !sourceCreds.isApiKeyMode, sourceCreds.needsRefresh, let rt = sourceCreds.refreshToken {
             do {
-                let refreshed = try await refreshCredentials(sourceCreds, refreshToken: rt)
+                let refreshed = try await refreshCredentials(
+                    sourceCreds,
+                    refreshToken: rt,
+                    persistTo: [expandedSource, expandedCredential]
+                )
                 effective = refreshed
-                persistRefreshedCredentials(refreshed, to: expandedCredential)
             } catch {
                 codexLog.warning("Recovery refresh failed for \(expandedCredential, privacy: .private): \(error.localizedDescription)")
                 throw ProviderError("recovery_refresh_failed", "Source credential refresh failed: \(error.localizedDescription)")
@@ -280,7 +289,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
 
     // MARK: - Credentials
 
-    private struct Credentials {
+    private struct Credentials: Sendable {
         let authFile: String
         let accessToken: String
         let refreshToken: String?
@@ -432,7 +441,76 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         )
     }
 
-    private func refreshCredentials(_ creds: Credentials, refreshToken: String) async throws -> Credentials {
+    private func refreshCredentials(
+        _ creds: Credentials,
+        refreshToken: String,
+        persistTo paths: [String]
+    ) async throws -> Credentials {
+        let key = Self.refreshLockKey(creds: creds, path: paths.first, refreshToken: refreshToken)
+        return try await CodexOAuthRefreshSerializer.shared.run(key: key) {
+            try await self.performSerializedRefresh(
+                creds,
+                fallbackRefreshToken: refreshToken,
+                persistTo: paths
+            )
+        }
+    }
+
+    private func performSerializedRefresh(
+        _ creds: Credentials,
+        fallbackRefreshToken: String,
+        persistTo paths: [String]
+    ) async throws -> Credentials {
+        var current = creds
+        if let path = paths.first, let disk = try? loadCredentials(from: path), !disk.isApiKeyMode {
+            current = disk
+            if !disk.needsRefresh {
+                return disk
+            }
+        }
+        let token = current.refreshToken ?? fallbackRefreshToken
+        let refreshed = try await performOAuthRefresh(current, refreshToken: token)
+        for path in uniqueRefreshPaths(paths) {
+            persistRefreshedCredentials(refreshed, to: path)
+        }
+        return refreshed
+    }
+
+    private func credentialRefreshPaths(credentialPath: String?, sourcePath: String?) -> [String] {
+        uniqueRefreshPaths([credentialPath, sourcePath].compactMap { raw in
+            let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !trimmed.isEmpty else { return nil }
+            return NSString(string: trimmed).expandingTildeInPath
+        })
+    }
+
+    private func uniqueRefreshPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var unique: [String] = []
+        for path in paths {
+            let normalized = AccountCredentialStore.normalizedAuthFilePath(path)
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            unique.append(path)
+        }
+        return unique
+    }
+
+    private static func refreshLockKey(creds: Credentials, path: String?, refreshToken: String) -> String {
+        if let account = creds.accountId?.trimmingCharacters(in: .whitespacesAndNewlines), !account.isEmpty,
+           let user = creds.jwtUserId?.trimmingCharacters(in: .whitespacesAndNewlines), !user.isEmpty {
+            return "ws:\(account.lowercased()):\(user.lowercased())"
+        }
+        let token = refreshToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty {
+            return "rt:\(token)"
+        }
+        if let path, !path.isEmpty {
+            return "path:\(AccountCredentialStore.normalizedAuthFilePath(path))"
+        }
+        return "codex-oauth"
+    }
+
+    private func performOAuthRefresh(_ creds: Credentials, refreshToken: String) async throws -> Credentials {
         guard let url = URL(string: Self.refreshURL) else {
             throw ProviderError("invalid_url", "Codex OAuth refresh URL is invalid.")
         }
@@ -550,8 +628,11 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         var creds = authContext.creds
 
         if !creds.isApiKeyMode, creds.needsRefresh, let refreshToken = creds.refreshToken {
-            creds = try await refreshCredentials(creds, refreshToken: refreshToken)
-            persistRefreshedCredentials(creds, to: authContext.url.path)
+            creds = try await refreshCredentials(
+                creds,
+                refreshToken: refreshToken,
+                persistTo: [authContext.url.path]
+            )
         }
 
         let usageURL = try resolveUsageURL()
@@ -569,8 +650,11 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         } catch let error as ProviderError where error.code == "unauthorized" {
             guard !creds.isApiKeyMode,
                   let refreshToken = creds.refreshToken ?? authContext.creds.refreshToken else { throw error }
-            let refreshed = try await refreshCredentials(creds, refreshToken: refreshToken)
-            persistRefreshedCredentials(refreshed, to: authContext.url.path)
+            let refreshed = try await refreshCredentials(
+                creds,
+                refreshToken: refreshToken,
+                persistTo: [authContext.url.path]
+            )
             let response = try await requestUsage(creds: refreshed, url: usageURL)
             return parseResponse(
                 response,
@@ -804,6 +888,27 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         case "education", "edu": return "Edu"
         default: return "Personal"
         }
+    }
+}
+
+/// Serializes Codex OAuth refresh per workspace so parallel account fetches
+/// cannot rotate the same refresh_token. Callers must reload/persist inside
+/// `run`; awaiting across the actor boundary is not a lock.
+private actor CodexOAuthRefreshSerializer {
+    static let shared = CodexOAuthRefreshSerializer()
+    private var tails: [String: Task<Void, Never>] = [:]
+
+    func run<T: Sendable>(
+        key: String,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let previous = tails[key]
+        let current = Task {
+            await previous?.value
+            return try await operation()
+        }
+        tails[key] = Task { _ = try? await current.value }
+        return try await current.value
     }
 }
 

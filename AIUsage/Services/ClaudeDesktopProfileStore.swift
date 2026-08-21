@@ -103,13 +103,14 @@ final class ClaudeDesktopProfileStore {
     /// entries when users alternate between AIUsage and another profile tool.
     static let profileID = "a1a5a9e0-7c1d-4e5f-9a0b-c1d2e3f4a5b6"
     static let profileName = "AIUsage Gateway"
-    // Both Claude products use the same compact Claude-shaped wire IDs. Code
-    // receives friendly display metadata, so these remain an implementation
-    // detail while also surviving Desktop's stricter model-ID validation.
-    static let defaultRouteID = "claude-aiusage"
-    static let opusRouteID = "claude-aiusage-opus"
-    static let sonnetRouteID = "claude-aiusage-sonnet"
-    static let haikuRouteID = "claude-aiusage-haiku"
+    // Desktop infers Effort / Thinking from family SKUs. These IDs must stay
+    // `claude-opus-*` / `claude-sonnet-*` / `claude-haiku-*` / `claude-fable-*`;
+    // compact `claude-aiusage*` names appear in the menu but never unlock those
+    // controls. `claude-sonnet-4-6` remains a Sonnet alias in the gateway.
+    static let defaultRouteID = "claude-fable-5"
+    static let opusRouteID = "claude-opus-5"
+    static let sonnetRouteID = "claude-sonnet-5"
+    static let haikuRouteID = "claude-haiku-4-5"
 
     struct Paths {
         let normalConfig: URL
@@ -299,6 +300,17 @@ final class ClaudeDesktopProfileStore {
         }
     }
     #endif
+
+    func appliedModelIDs() -> [String] {
+        let profile = (try? readJSONObject(paths.profile, missingAsEmpty: true)) ?? [:]
+        let models = profile["inferenceModels"] as? [[String: Any]] ?? []
+        return models.compactMap { name in
+            guard let value = (name["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else { return nil }
+            return value
+        }
+    }
 
     func status() -> Status {
         let metaObject = (try? readJSONObject(paths.meta, missingAsEmpty: true)) ?? [:]
@@ -508,8 +520,8 @@ final class ClaudeDesktopProfileStore {
         object["inferenceGatewayBaseUrl"] = baseURL
         object["inferenceGatewayApiKey"] = clientKey
         object["disableDeploymentModeChooser"] = true
-        // The four AIUsage routes use compact Claude-shaped IDs. Full-catalog
-        // mode may append generated IDs for direct node-model selection.
+        // Smart-route IDs are family SKUs so Desktop can attach Effort / Thinking.
+        // Full-catalog mode may append generated role-shaped IDs for node models.
         object.removeValue(forKey: "inferenceGatewayAuthScheme")
         object["inferenceModels"] = catalog.map { entry -> [String: Any] in
             var model: [String: Any] = [

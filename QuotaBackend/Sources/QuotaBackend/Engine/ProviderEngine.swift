@@ -101,16 +101,15 @@ public actor ProviderEngine {
         }
 
         if hasCredentials && isMultiAccount {
-            async let automaticResults = fetchAutomaticResults(for: provider)
-            async let credentialResults = fetchCredentialBackedResults(for: provider)
-            let resolvedCredentialResults = await credentialResults
-            let successfulCredentialKeys = Set(
-                resolvedCredentialResults
-                    .filter(\.ok)
-                    .map { identityKey(for: $0, providerId: provider.id) }
+            // Credential fetches must finish before auto-scan. Running both at
+            // once lets two Codex OAuth refreshes burn the same refresh_token;
+            // the failed branch then keeps stale quota in the UI.
+            let resolvedCredentialResults = await fetchCredentialBackedResults(for: provider)
+            let credentialIdentityKeys = Set(
+                resolvedCredentialResults.flatMap { identityKeys(for: $0, providerId: provider.id) }
             )
-            let filteredAutomaticResults = (await automaticResults).filter { result in
-                !successfulCredentialKeys.contains(identityKey(for: result, providerId: provider.id))
+            let filteredAutomaticResults = (await fetchAutomaticResults(for: provider)).filter { result in
+                identityKeys(for: result, providerId: provider.id).isDisjoint(with: credentialIdentityKeys)
             }
             let merged = mergeResults(
                 automatic: filteredAutomaticResults,
@@ -472,6 +471,31 @@ public actor ProviderEngine {
             }
             return result
         }
+    }
+
+    private func identityKeys(for result: ProviderResult, providerId: String) -> Set<String> {
+        var keys: Set<String> = [identityKey(for: result, providerId: providerId)]
+        if let path = result.summary?.sourceFilePath?.nilIfBlank {
+            keys.insert("\(providerId):path:\(AccountCredentialStore.normalizedAuthFilePath(path))")
+        }
+        if let credentialId = extractCredentialId(from: result.id) {
+            keys.insert("\(providerId):cred:\(credentialId)")
+        }
+        if providerId.lowercased() == "codex" {
+            let accountId = normalizedIdentity(result.resultAccountId)
+                ?? normalizedIdentity(result.summary?.accountId)
+                ?? normalizedIdentity(result.usage?.usageAccountId)
+            let userId = normalizedIdentity(result.usage?.extra["userId"]?.value as? String)
+            let email = normalizedIdentity(result.usage?.accountEmail)
+                ?? normalizedIdentity(result.summary?.accountLabel)
+            if let accountId, let userId {
+                keys.insert("\(providerId):account:\(accountId):user:\(userId)")
+            }
+            if let accountId, let email {
+                keys.insert("\(providerId):account:\(accountId):email:\(email)")
+            }
+        }
+        return keys
     }
 
     private func identityKey(for result: ProviderResult, providerId: String) -> String {

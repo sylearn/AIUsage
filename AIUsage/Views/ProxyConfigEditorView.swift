@@ -150,7 +150,10 @@ struct ProxyConfigEditorView: View {
             Divider()
             footerBar
         }
-        .frame(width: 980, height: 660)
+        // Cap size so the sheet fits smaller displays; the section ScrollView
+        // absorbs overflow while header/footer stay on screen.
+        .frame(minWidth: 760, idealWidth: 900, maxWidth: 980,
+               minHeight: 480, idealHeight: 660, maxHeight: 680)
         .confirmationDialog(
             L("Delete “\(profile.metadata.name)”?", "删除「\(profile.metadata.name)」？"),
             isPresented: $showDeleteConfirmation,

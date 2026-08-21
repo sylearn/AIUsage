@@ -326,12 +326,30 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             return
         }
         if let node = ProxyViewModel.shared.configurations.first(where: { $0.id == gateway.activeNodeId }) {
-            configuredModels = ClaudeDesktopProfileStore.catalog(
+            let catalog = ClaudeDesktopProfileStore.catalog(
                 for: node,
                 mode: gateway.config.effectiveClaudeDesktopCatalogMode,
                 supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
                 routes: gateway.config.effectiveClaudeDesktopModels(for: node)
             )
+            let diskIDs = profileStore.appliedModelIDs()
+            let catalogIDs = catalog.map(\.id)
+            if diskIDs != catalogIDs, !catalog.isEmpty {
+                do {
+                    try profileStore.refresh(
+                        baseURL: gateway.config.claudeDesktopBaseURL,
+                        clientKey: gateway.config.effectiveClaudeDesktopClientKey,
+                        catalog: catalog
+                    )
+                    if ClaudeDesktopAppController.isRunning, let appURL = installation.appURL {
+                        try await ClaudeDesktopAppController.restart(appURL: appURL)
+                    }
+                } catch {
+                    state = .failed(error.localizedDescription)
+                    return
+                }
+            }
+            configuredModels = catalog
             activeNodeName = node.name
         }
         state = .ready

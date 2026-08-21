@@ -140,6 +140,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     private var modelCatalogRefreshID: UUID?
     private var modelCatalogRuntimePID: Int32?
     private var managedProviderCredentialRefreshTask: Task<Void, Never>?
+    private var isCheckingRelease = false
 
     static let maxAuthFileImportBytes = 5 * 1_048_576
 
@@ -156,16 +157,24 @@ final class CLIProxyGatewayManager: ObservableObject {
 
     init(
         paths: CLIProxyPaths,
-        releaseClient: CLIProxyReleaseClient = CLIProxyReleaseClient(),
+        releaseClient: CLIProxyReleaseClient? = nil,
         downloader: CLIProxyAssetDownloader = CLIProxyAssetDownloader(),
         binaryStore: CLIProxyBinaryStore? = nil,
         runtime: CLIProxyRuntimeController? = nil
     ) {
         self.paths = paths
-        self.releaseClient = releaseClient
+        self.releaseClient = releaseClient ?? CLIProxyReleaseClient(cacheURL: paths.githubReleaseCacheURL)
         self.downloader = downloader
         self.binaryStore = binaryStore ?? CLIProxyBinaryStore(paths: paths)
         self.runtime = runtime ?? CLIProxyRuntimeController.shared
+        if let cached = self.releaseClient.cachedLookup() {
+            self.latestRelease = cached.release
+            self.lastCheckedAt = cached.fetchedAt
+        }
+        if let cached = self.releaseClient.cachedLookup() {
+            self.latestRelease = cached.release
+            self.lastCheckedAt = cached.fetchedAt
+        }
         if let raw = UserDefaults.standard.string(forKey: Self.openCodeProtocolDefaultsKey),
            let proto = OpenCodeProtocol(rawValue: raw) {
             self.managedOpenCodeProtocol = proto
@@ -240,20 +249,57 @@ final class CLIProxyGatewayManager: ObservableObject {
             await refreshSyncCandidates()
         }
         guard checkRemote else { return }
-        await checkForUpdates()
+        await checkForUpdates(force: false)
     }
 
-    func checkForUpdates() async {
+    func checkForUpdates(force: Bool = false) async {
         guard !operation.isBusy else { return }
-        operation = .checking
-        lastError = nil
-        defer { operation = .idle }
-        do {
-            latestRelease = try await releaseClient.latestStableRelease()
-            lastCheckedAt = Date()
-        } catch {
-            lastError = error.localizedDescription
+        guard !isCheckingRelease else { return }
+        isCheckingRelease = true
+        if force {
+            operation = .checking
+            lastError = nil
         }
+        defer {
+            isCheckingRelease = false
+            if operation == .checking { operation = .idle }
+        }
+        do {
+            let lookup = try await releaseClient.lookupLatestRelease(forceRefresh: force)
+            latestRelease = lookup.release
+            lastCheckedAt = lookup.fetchedAt
+            if force, lookup.rateLimitedUntil != nil {
+                lastError = Self.githubRateLimitMessage(resetAt: lookup.rateLimitedUntil)
+            }
+        } catch {
+            if force || latestRelease == nil {
+                lastError = Self.localizedGitHubReleaseError(error)
+            }
+        }
+    }
+
+    private static func githubRateLimitMessage(resetAt: Date?) -> String {
+        if let resetAt {
+            let stamp = DateFormat.string(from: resetAt, format: "HH:mm")
+            return L(
+                "GitHub is rate-limiting unauthenticated release checks (about 60/hour). Cached CLIProxyAPI version info is still shown. Try again after \(stamp).",
+                "GitHub 未登录接口每小时大约 60 次，当前已限流。已改用上次缓存的 CPA 版本，请 \(stamp) 后再检查。"
+            )
+        }
+        return L(
+            "GitHub is rate-limiting unauthenticated release checks (about 60/hour). Cached CLIProxyAPI version info is still shown. Try again later.",
+            "GitHub 未登录接口每小时大约 60 次，当前已限流。已改用上次缓存的 CPA 版本，请稍后再检查。"
+        )
+    }
+
+    private static func localizedGitHubReleaseError(_ error: Error) -> String {
+        if case CLIProxyGatewayError.githubRateLimited(let resetAt) = error {
+            return githubRateLimitMessage(resetAt: resetAt)
+        }
+        if case CLIProxyGatewayError.invalidHTTPStatus(let status) = error, status == 403 || status == 429 {
+            return githubRateLimitMessage(resetAt: nil)
+        }
+        return error.localizedDescription
     }
 
     func installOrUpdateLatest() async {
@@ -265,9 +311,10 @@ final class CLIProxyGatewayManager: ObservableObject {
                 release = latestRelease
             } else {
                 operation = .checking
-                release = try await releaseClient.latestStableRelease()
+                let lookup = try await releaseClient.lookupLatestRelease(forceRefresh: true)
+                release = lookup.release
                 self.latestRelease = release
-                lastCheckedAt = Date()
+                lastCheckedAt = lookup.fetchedAt
             }
 
             if currentVersion == release.version {

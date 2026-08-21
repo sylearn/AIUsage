@@ -166,7 +166,7 @@ struct GatewayRuntimeControl: View {
             systemImage: "arrow.triangle.2.circlepath"
         ) {
             isOpen = false
-            Task { await manager.refresh() }
+            Task { await manager.refresh(checkRemote: false) }
         }
         panelRow(
             title: L("Open Settings", "打开设置"),

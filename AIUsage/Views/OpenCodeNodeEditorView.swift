@@ -131,8 +131,10 @@ struct OpenCodeNodeEditorView: View {
             Divider()
             footer
         }
-        // 单页表单，与 Codex 编辑器同尺寸。
-        .frame(width: 750, height: 800)
+        // Cap height so header/footer stay reachable on smaller displays;
+        // ScrollView absorbs overflow. Same metrics as the API provider editor.
+        .frame(minWidth: 640, idealWidth: 760, maxWidth: 800,
+               minHeight: 480, idealHeight: 660, maxHeight: 680)
         .onChange(of: node.pricingCurrency) { oldCurrency, newCurrency in
             convertPrices(from: oldCurrency, to: newCurrency)
         }

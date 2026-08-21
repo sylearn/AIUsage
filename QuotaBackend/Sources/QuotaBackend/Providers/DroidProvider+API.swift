@@ -12,9 +12,7 @@ extension DroidProvider {
         for candidateAuth in authVariants(for: auth) {
             for baseURL in Self.baseURLs {
                 do {
-                    let authInfo = try await requestAuthInfo(baseURL: baseURL, auth: candidateAuth)
-                    let usageInfo = try await requestUsageInfo(baseURL: baseURL, auth: candidateAuth)
-                    return (authInfo, usageInfo, candidateAuth)
+                    return try await fetchSnapshot(baseURL: baseURL, auth: candidateAuth)
                 } catch {
                     lastError = error
                 }
@@ -27,9 +25,7 @@ extension DroidProvider {
             for candidateAuth in authVariants(for: refreshedAuth) {
                 for baseURL in Self.baseURLs {
                     do {
-                        let authInfo = try await requestAuthInfo(baseURL: baseURL, auth: candidateAuth)
-                        let usageInfo = try await requestUsageInfo(baseURL: baseURL, auth: candidateAuth)
-                        return (authInfo, usageInfo, candidateAuth)
+                        return try await fetchSnapshot(baseURL: baseURL, auth: candidateAuth)
                     } catch {
                         lastError = error
                     }
@@ -38,6 +34,27 @@ extension DroidProvider {
         }
 
         throw lastError
+    }
+
+    private func fetchSnapshot(
+        baseURL: String,
+        auth: DroidAuth
+    ) async throws -> ([String: Any], [String: Any], DroidAuth) {
+        let authInfo = try await requestAuthInfo(baseURL: baseURL, auth: auth)
+        let usageInfo: [String: Any]
+        do {
+            let billingLimits = try await requestBillingLimits(baseURL: baseURL, auth: auth)
+            if billingLimits["usesTokenRateLimitsBilling"] as? Bool == true {
+                usageInfo = ["billingLimits": billingLimits]
+            } else {
+                usageInfo = try await requestUsageInfo(baseURL: baseURL, auth: auth)
+            }
+        } catch let error as ProviderError where error.code == "invalid_credentials" {
+            throw error
+        } catch {
+            usageInfo = try await requestUsageInfo(baseURL: baseURL, auth: auth)
+        }
+        return (authInfo, usageInfo, auth)
     }
 
     func authVariants(for auth: DroidAuth) -> [DroidAuth] {
@@ -89,6 +106,13 @@ extension DroidProvider {
     func requestAuthInfo(baseURL: String, auth: DroidAuth) async throws -> [String: Any] {
         guard let url = URL(string: "\(baseURL)/api/app/auth/me") else {
             throw ProviderError("invalid_url", "Droid auth URL is invalid.")
+        }
+        return try await requestDroidJSON(url: url, method: "GET", body: nil, auth: auth)
+    }
+
+    func requestBillingLimits(baseURL: String, auth: DroidAuth) async throws -> [String: Any] {
+        guard let url = URL(string: "\(baseURL)/api/billing/limits") else {
+            throw ProviderError("invalid_url", "Droid billing limits URL is invalid.")
         }
         return try await requestDroidJSON(url: url, method: "GET", body: nil, auth: auth)
     }

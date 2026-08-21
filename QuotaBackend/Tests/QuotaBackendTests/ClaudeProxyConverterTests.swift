@@ -287,10 +287,16 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(config.mapToUpstreamModel(routes[1]), "node-a-large")
         XCTAssertEqual(config.mapToUpstreamModel(routes[2]), "node-a-balanced")
         XCTAssertEqual(config.mapToUpstreamModel(routes[3]), "node-a-fast")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-aiusage"), "node-a-default")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-sonnet-5"), "node-a-balanced")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-sonnet-4-6"), "node-a-balanced")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-aiusage-opus"), "node-a-large")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-aiusage-sonnet"), "node-a-balanced")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-aiusage-haiku"), "node-a-fast")
     }
 
     func testCodeSmartRoutesRemainStableWhileGatewayMappingChanges() {
-        XCTAssertEqual(ScienceModelProtocolAdapter.defaultRouteID, "claude-aiusage")
+        XCTAssertEqual(ScienceModelProtocolAdapter.defaultRouteID, "claude-fable-5")
         let routes = [
             ScienceModelProtocolAdapter.defaultRouteID,
             ScienceModelProtocolAdapter.opusRouteID,

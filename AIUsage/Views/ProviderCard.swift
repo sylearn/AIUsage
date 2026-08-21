@@ -92,7 +92,11 @@ struct ProviderCard: View {
             }
 
             if useMultiWindowLayout {
-                MultiWindowQuotaView(windows: provider.windows, accentColor: accentColor)
+                MultiWindowQuotaView(
+                    windows: provider.windows,
+                    accentColor: accentColor,
+                    visibleWindowLimit: Self.multiWindowVisibleLimit(for: provider.providerId)
+                )
             } else if let remaining = provider.remainingPercent {
                 QuotaIndicatorView(remainingPercent: remaining, accentColor: accentColor, resetAt: provider.nextResetAt)
             }
@@ -410,9 +414,14 @@ struct ProviderCard: View {
             && provider.windows.contains(where: { $0.remainingPercent != nil })
     }
 
-    /// 采用 Codex 式双窗口（多行进度）布局的服务商：Kimi Code 和 MiniMax Token Plan
-    /// 都和 Codex 一样同时提供「5 小时滚动 + 7 天/本周」两个窗口，需并排展示而非只显示最紧的那一行。
-    private static let multiWindowProviderIds: Set<String> = ["codex", "kimi", "minimax"]
+    /// 采用多窗口进度布局的服务商。
+    /// Codex / Kimi / MiniMax：卡片只展示 5 小时 + 周窗口两条（第三条如 Code Review 进详情）。
+    /// Droid Individual：5 小时 / 周 / 月都是硬限制，卡片展示三条。
+    private static let multiWindowProviderIds: Set<String> = ["codex", "kimi", "minimax", "droid"]
+
+    private static func multiWindowVisibleLimit(for providerId: String) -> Int {
+        providerId == "droid" ? 3 : 2
+    }
 
     private var shouldShowStatusBadge: Bool {
         switch provider.status {
