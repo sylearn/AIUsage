@@ -31,12 +31,17 @@ struct StatusBarItemView: View {
     }
 
     private var quotaItems: [StatusBarMetricItem] {
+        let hidden = settings.hiddenSidebarSections
         let groups = appState.providerAccountGroups
         var all: [StatusBarMetricItem] = []
 
         for group in groups {
+            guard !AgentVisibility.isProviderHidden(group.providerId, hidden: hidden) else { continue }
             for entry in group.accounts where entry.isConnected {
-                guard entry.liveProvider?.category != "local-cost" else { continue }
+                guard AgentVisibility.isQuotaAccount(
+                    providerId: group.providerId,
+                    category: entry.liveProvider?.category
+                ) else { continue }
                 guard let quota = entry.liveProvider?.remainingPercent else { continue }
 
                 all.append(StatusBarMetricItem(
@@ -53,12 +58,17 @@ struct StatusBarItemView: View {
     }
 
     private var costItems: [StatusBarMetricItem] {
+        let hidden = settings.hiddenSidebarSections
         let groups = appState.providerAccountGroups
         var all: [StatusBarMetricItem] = []
 
         for group in groups {
+            guard !AgentVisibility.isProviderHidden(group.providerId, hidden: hidden) else { continue }
             for entry in group.accounts where entry.isConnected {
-                guard entry.liveProvider?.category == ProviderCategory.localCost else { continue }
+                guard AgentVisibility.isCostAccount(
+                    providerId: group.providerId,
+                    category: entry.liveProvider?.category
+                ) else { continue }
                 guard pinnedCostIds.contains(entry.id) else { continue }
                 guard let summary = entry.liveProvider?.costSummary else { continue }
 

@@ -111,6 +111,13 @@ final class ClaudeDesktopProfileStore {
     static let opusRouteID = "claude-opus-5"
     static let sonnetRouteID = "claude-sonnet-5"
     static let haikuRouteID = "claude-haiku-4-5"
+    // Claude Code pretty-prints known family SKUs in the status bar
+    // (`claude-opus-5` → "Opus 5"). Compact IDs stay off that table so the
+    // `/v1/models` display_name and `*_MODEL_NAME` aliases remain "AIUsage *".
+    static let codeDefaultRouteID = "claude-aiusage"
+    static let codeOpusRouteID = "claude-aiusage-opus"
+    static let codeSonnetRouteID = "claude-aiusage-sonnet"
+    static let codeHaikuRouteID = "claude-aiusage-haiku"
 
     struct Paths {
         let normalConfig: URL
@@ -216,10 +223,15 @@ final class ClaudeDesktopProfileStore {
         for node: ProxyConfiguration,
         mode: ClaudeDesktopCatalogMode,
         supports1M: Set<String> = [],
-        routes: ClaudeAppResolvedModels? = nil
+        routes: ClaudeAppResolvedModels? = nil,
+        productRouteIDs: [String]? = nil
     ) -> ClaudeProductGatewayCatalogProjection {
         let resolved = resolvedRoutes(for: node, routes: routes)
-        let routeEntries = productRouteEntries(resolved: resolved, supports1M: supports1M)
+        let routeEntries = productRouteEntries(
+            resolved: resolved,
+            supports1M: supports1M,
+            ids: productRouteIDs
+        )
         switch mode {
         case .smartRoutes:
             return ClaudeProductGatewayCatalogProjection(
@@ -271,9 +283,10 @@ final class ClaudeDesktopProfileStore {
 
     private static func productRouteEntries(
         resolved: ClaudeAppResolvedModels,
-        supports1M: Set<String>
+        supports1M: Set<String>,
+        ids: [String]? = nil
     ) -> [ClaudeDesktopCatalogEntry] {
-        let ids = [
+        let ids = ids ?? [
             defaultRouteID,
             opusRouteID,
             sonnetRouteID,

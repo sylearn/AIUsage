@@ -147,7 +147,15 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
                 ClaudeDesktopProfileStore.gatewayProjection(
                     for: node,
                     mode: mode,
-                    routes: codeModels
+                    routes: codeModels,
+                    productRouteIDs: mode == .smartRoutes
+                        ? [
+                            ClaudeDesktopProfileStore.codeDefaultRouteID,
+                            ClaudeDesktopProfileStore.codeOpusRouteID,
+                            ClaudeDesktopProfileStore.codeSonnetRouteID,
+                            ClaudeDesktopProfileStore.codeHaikuRouteID,
+                        ]
+                        : nil
                 ),
                 "code",
                 mode == .smartRoutes
@@ -278,10 +286,10 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
             authToken: config.effectiveClientKey,
             // Smart mode never leaks a node-owned model id into Claude Code's
             // session identity. The Gateway remaps these durable routes live.
-            defaultModel: smartRoutes ? ClaudeDesktopProfileStore.defaultRouteID : routes?.defaultModel,
-            opusModel: smartRoutes ? ClaudeDesktopProfileStore.opusRouteID : (routes?.opus ?? config.claudeOpus),
-            sonnetModel: smartRoutes ? ClaudeDesktopProfileStore.sonnetRouteID : (routes?.sonnet ?? config.claudeSonnet),
-            haikuModel: smartRoutes ? ClaudeDesktopProfileStore.haikuRouteID : (routes?.haiku ?? config.claudeHaiku),
+            defaultModel: smartRoutes ? ClaudeDesktopProfileStore.codeDefaultRouteID : routes?.defaultModel,
+            opusModel: smartRoutes ? ClaudeDesktopProfileStore.codeOpusRouteID : (routes?.opus ?? config.claudeOpus),
+            sonnetModel: smartRoutes ? ClaudeDesktopProfileStore.codeSonnetRouteID : (routes?.sonnet ?? config.claudeSonnet),
+            haikuModel: smartRoutes ? ClaudeDesktopProfileStore.codeHaikuRouteID : (routes?.haiku ?? config.claudeHaiku),
             modelPresentation: smartRoutes ? .aiUsageRoutes : nil,
             // Full catalog needs discovery for real node ids; smart mode needs
             // it so the stable Default route is restored as a known model.

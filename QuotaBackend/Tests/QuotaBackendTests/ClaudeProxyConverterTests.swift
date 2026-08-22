@@ -296,12 +296,12 @@ final class ClaudeProxyConverterTests: XCTestCase {
     }
 
     func testCodeSmartRoutesRemainStableWhileGatewayMappingChanges() {
-        XCTAssertEqual(ScienceModelProtocolAdapter.defaultRouteID, "claude-fable-5")
+        XCTAssertEqual(ScienceModelProtocolAdapter.legacyDefaultRouteID, "claude-aiusage")
         let routes = [
-            ScienceModelProtocolAdapter.defaultRouteID,
-            ScienceModelProtocolAdapter.opusRouteID,
-            ScienceModelProtocolAdapter.sonnetRouteID,
-            ScienceModelProtocolAdapter.haikuRouteID,
+            ScienceModelProtocolAdapter.legacyDefaultRouteID,
+            ScienceModelProtocolAdapter.legacyOpusRouteID,
+            ScienceModelProtocolAdapter.legacySonnetRouteID,
+            ScienceModelProtocolAdapter.legacyHaikuRouteID,
         ]
         let firstNode = ClaudeProxyConfiguration(
             enabled: true,
@@ -341,6 +341,14 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(
             firstNode.scienceCatalogModels.map(\.displayName),
             ["AIUsage", "AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
+        )
+        XCTAssertEqual(
+            firstNode.mapToUpstreamModel(ScienceModelProtocolAdapter.opusRouteID),
+            "GLM-5.2"
+        )
+        XCTAssertEqual(
+            firstNode.mapToUpstreamModel(ScienceModelProtocolAdapter.defaultRouteID),
+            "provider/default-a"
         )
     }
 

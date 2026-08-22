@@ -40,9 +40,11 @@ public struct ScienceModelProtocolAdapter: Sendable {
     /// Desktop infers Effort / Thinking from Claude family SKUs
     /// (`claude-opus-*`, `claude-sonnet-*`, `claude-haiku-*`, `claude-fable-*`).
     /// Compact `claude-aiusage*` IDs pass the third-party blacklist but never
-    /// match that capability table, so the product routes use current Desktop
-    /// menu SKUs. `claude-sonnet-4-6` remains a Sonnet alias so already-open
-    /// sessions keep mapping to the Sonnet tier after the sonnet-5 cutover.
+    /// match that capability table, so Desktop product routes use current menu
+    /// SKUs. Claude Code's status bar pretty-prints those same SKUs as
+    /// "Opus 5" / "Fable 5", so Code smart routes keep publishing the compact
+    /// IDs and map both families here. `claude-sonnet-4-6` remains a Sonnet
+    /// alias so already-open sessions keep mapping after the sonnet-5 cutover.
     public static let defaultRouteID = "claude-fable-5"
     public static let opusRouteID = "claude-opus-5"
     public static let sonnetRouteID = "claude-sonnet-5"

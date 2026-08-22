@@ -32,7 +32,7 @@ struct MenuBarView: View {
                 Divider()
                 menuBarFooter
             }
-            if let track = openPanelTrack {
+            if let track = openPanelTrack, isMenuBarTrackVisible(track) {
                 trackPanelOverlay(track: track)
             }
         }
@@ -66,8 +66,11 @@ struct MenuBarView: View {
     // MARK: - Header
 
     private var overallStatus: OverallHealthStatus {
-        let groups = appState.providerAccountGroups
-        let providers = refreshCoordinator.providers
+        let hidden = settings.hiddenSidebarSections
+        let groups = visibleQuotaProviderGroups
+        let providers = refreshCoordinator.providers.filter {
+            !AgentVisibility.isProviderHidden($0.baseProviderId, hidden: hidden)
+        }
         let hasCritical = providers.contains { $0.status == .error }
         let hasWarning = providers.contains { ($0.remainingPercent ?? 100) < 35 }
         if hasCritical { return .critical }
@@ -136,7 +139,7 @@ struct MenuBarView: View {
     // MARK: - Compact Badges
 
     private var compactAccountsBadge: some View {
-        let groups = appState.providerAccountGroups
+        let groups = visibleQuotaProviderGroups
         let totalAccounts = groups.reduce(0) { $0 + $1.accounts.count }
         let connectedAccounts = groups.reduce(0) { $0 + $1.connectedCount }
 
@@ -157,9 +160,27 @@ struct MenuBarView: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
     }
 
-    private var quotaProviderGroups: [ProviderAccountGroup] {
-        appState.providerAccountGroups.filter { group in
-            group.accounts.contains { $0.liveProvider?.category != "local-cost" }
+    private var quotaProviderGroups: [ProviderAccountGroup] { visibleQuotaProviderGroups }
+
+    private var visibleQuotaProviderGroups: [ProviderAccountGroup] {
+        let hidden = settings.hiddenSidebarSections
+        return appState.providerAccountGroups.filter { group in
+            !AgentVisibility.isProviderHidden(group.providerId, hidden: hidden)
+                && group.accounts.contains {
+                    AgentVisibility.isQuotaAccount(
+                        providerId: group.providerId,
+                        category: $0.liveProvider?.category
+                    )
+                }
+        }
+    }
+
+    private func isMenuBarTrackVisible(_ track: GlobalProxyTrack) -> Bool {
+        let hidden = settings.hiddenSidebarSections
+        switch track {
+        case .codex: return AgentVisibility.isVisible(.codex, hidden: hidden)
+        case .opencode: return AgentVisibility.isVisible(.opencode, hidden: hidden)
+        case .claude, .desktop, .science: return AgentVisibility.isVisible(.claude, hidden: hidden)
         }
     }
 

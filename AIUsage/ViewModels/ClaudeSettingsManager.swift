@@ -77,21 +77,35 @@ class ClaudeSettingsManager {
     private let managedEnvKeys = [
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
         "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
         "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
         "ANTHROPIC_CUSTOM_MODEL_OPTION",
         "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
         "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
         "NODE_EXTRA_CA_CERTS",
     ]
+
+    /// Capabilities Claude Code honors for pinned 3P models that are not in
+    /// its baked family table. A firstParty custom BASE_URL also falls back
+    /// to enabling effort for unknown IDs; this list keeps Bedrock/Vertex
+    /// and `/effort` aligned if that fallback changes.
+    private static let virtualRouteCapabilities = "thinking,adaptive_thinking,effort,max_effort,xhigh_effort"
 
     struct EnvConfig {
         enum ModelPresentation: Equatable {
@@ -119,21 +133,33 @@ class ClaudeSettingsManager {
             "由 AIUsage Gateway 热切换的稳定路由"
         )
         let presentsAIUsageRoutes = config.modelPresentation == .aiUsageRoutes
+        let capabilities = presentsAIUsageRoutes ? Self.virtualRouteCapabilities : nil
         let pairs: [(String, String?)] = [
             ("ANTHROPIC_BASE_URL", config.baseURL),
             ("ANTHROPIC_AUTH_TOKEN", config.authToken),
+            ("ANTHROPIC_DEFAULT_FABLE_MODEL", presentsAIUsageRoutes ? config.defaultModel : nil),
+            ("ANTHROPIC_DEFAULT_FABLE_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage" : nil),
+            ("ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES", capabilities),
             ("ANTHROPIC_DEFAULT_OPUS_MODEL", config.opusModel),
             ("ANTHROPIC_DEFAULT_OPUS_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Opus" : nil),
             ("ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES", capabilities),
             ("ANTHROPIC_DEFAULT_SONNET_MODEL", config.sonnetModel),
             ("ANTHROPIC_DEFAULT_SONNET_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Sonnet" : nil),
             ("ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES", capabilities),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL", config.haikuModel),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Haiku" : nil),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES", capabilities),
+            // Keep the extra picker row for the default virtual route. Family
+            // alias `fable` is pinned separately so `/model fable` cannot fall
+            // back to the baked "Fable 5" SKU.
             ("ANTHROPIC_CUSTOM_MODEL_OPTION", presentsAIUsageRoutes ? config.defaultModel : nil),
             ("ANTHROPIC_CUSTOM_MODEL_OPTION_NAME", presentsAIUsageRoutes ? "AIUsage" : nil),
             ("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES", capabilities),
             ("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", config.enableGatewayModelDiscovery ? "1" : nil),
             ("NODE_EXTRA_CA_CERTS", config.nodeExtraCACerts),
         ]

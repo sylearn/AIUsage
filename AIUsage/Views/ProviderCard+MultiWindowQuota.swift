@@ -26,14 +26,19 @@ struct MultiWindowQuotaView: View {
     }
 
     private func windowLabel(_ label: String) -> String {
-        guard appState.language == "zh" else { return label }
         switch label {
-        case "5h Window", "5-hour": return "5小时剩余"
-        case "Weekly Window", "Weekly": return "7天剩余"
-        case "Monthly Window", "Monthly": return "月限额剩余"
-        case "Code Review":    return "代码审查"
-        case "Rate Limit":     return "频限明细"
-        default:               return label
+        case "5h Window", "5-hour":
+            return L("5 hours", "5 小时")
+        case "Weekly Window", "Weekly":
+            return L("7 days", "7 天")
+        case "Monthly Window", "Monthly":
+            return L("1 month", "1 个月")
+        case "Code Review":
+            return L("Code Review", "代码审查")
+        case "Rate Limit":
+            return L("Rate Limit", "频限明细")
+        default:
+            return label
         }
     }
 

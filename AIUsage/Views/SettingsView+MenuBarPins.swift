@@ -8,9 +8,17 @@ import QuotaBackend
 extension SettingsView {
 
     func pruneStaleMenuBarPins() {
-        let allEntries = appState.providerAccountGroups.flatMap(\.accounts)
-        let quotaIds = Set(allEntries.filter { $0.liveProvider?.category != "local-cost" }.map(\.id))
-        let costIds = Set(allEntries.filter { $0.liveProvider?.category == ProviderCategory.localCost }.map(\.id))
+        let allEntries = appState.providerAccountGroups.flatMap { group in
+            group.accounts.map { (providerId: group.providerId, entry: $0) }
+        }
+        let quotaIds = Set(allEntries.compactMap { pair in
+            AgentVisibility.isQuotaAccount(providerId: pair.providerId, category: pair.entry.liveProvider?.category)
+                ? pair.entry.id : nil
+        })
+        let costIds = Set(allEntries.compactMap { pair in
+            AgentVisibility.isCostAccount(providerId: pair.providerId, category: pair.entry.liveProvider?.category)
+                ? pair.entry.id : nil
+        })
         settings.pruneMenuBarPinnedIds(validQuotaIds: quotaIds, validCostIds: costIds)
     }
 
@@ -19,10 +27,18 @@ extension SettingsView {
             title: L("Quota accounts", "配额账号"),
             subtitle: L("Select quota-based accounts to show in the menu bar. Empty = icon only. You can also right-click accounts in the popover to pin.", "选择显示在菜单栏的配额账号。不选则仅显示图标。也可在弹窗中右键账号进行固定。")
         ) {
-            let groups = appState.providerAccountGroups
+            let hidden = settings.hiddenSidebarSections
+            let groups = appState.providerAccountGroups.filter {
+                !AgentVisibility.isProviderHidden($0.providerId, hidden: hidden)
+            }
             let quotaEntries = groups.flatMap { group in
                 group.accounts
-                    .filter { $0.liveProvider?.category != "local-cost" }
+                    .filter {
+                        AgentVisibility.isQuotaAccount(
+                            providerId: group.providerId,
+                            category: $0.liveProvider?.category
+                        )
+                    }
                     .map { (group: group, entry: $0) }
             }
 
@@ -44,10 +60,18 @@ extension SettingsView {
             title: L("Cost sources", "费用来源"),
             subtitle: L("Select cost sources to show in the menu bar.", "选择显示在菜单栏的费用来源。")
         ) {
-            let groups = appState.providerAccountGroups
+            let hidden = settings.hiddenSidebarSections
+            let groups = appState.providerAccountGroups.filter {
+                !AgentVisibility.isProviderHidden($0.providerId, hidden: hidden)
+            }
             let costEntries = groups.flatMap { group in
                 group.accounts
-                    .filter { $0.liveProvider?.category == ProviderCategory.localCost }
+                    .filter {
+                        AgentVisibility.isCostAccount(
+                            providerId: group.providerId,
+                            category: $0.liveProvider?.category
+                        )
+                    }
                     .map { (group: group, entry: $0) }
             }
 
@@ -187,19 +211,33 @@ extension SettingsView {
     }
 
     private var validPinnedQuotaIds: Set<String> {
+        let hidden = settings.hiddenSidebarSections
         let allEntryIds = Set(
-            appState.providerAccountGroups.flatMap { $0.accounts }
-                .filter { $0.liveProvider?.category != "local-cost" }
-                .map(\.id)
+            appState.providerAccountGroups.flatMap { group -> [String] in
+                guard !AgentVisibility.isProviderHidden(group.providerId, hidden: hidden) else { return [] }
+                return group.accounts.compactMap { entry in
+                    AgentVisibility.isQuotaAccount(
+                        providerId: group.providerId,
+                        category: entry.liveProvider?.category
+                    ) ? entry.id : nil
+                }
+            }
         )
         return settings.menuBarPinnedQuotaAccountIds.intersection(allEntryIds)
     }
 
     private var validPinnedCostIds: Set<String> {
+        let hidden = settings.hiddenSidebarSections
         let allEntryIds = Set(
-            appState.providerAccountGroups.flatMap { $0.accounts }
-                .filter { $0.liveProvider?.category == ProviderCategory.localCost }
-                .map(\.id)
+            appState.providerAccountGroups.flatMap { group -> [String] in
+                guard !AgentVisibility.isProviderHidden(group.providerId, hidden: hidden) else { return [] }
+                return group.accounts.compactMap { entry in
+                    AgentVisibility.isCostAccount(
+                        providerId: group.providerId,
+                        category: entry.liveProvider?.category
+                    ) ? entry.id : nil
+                }
+            }
         )
         return settings.menuBarPinnedCostSourceIds.intersection(allEntryIds)
     }

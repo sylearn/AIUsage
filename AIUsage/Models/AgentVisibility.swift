@@ -3,8 +3,9 @@ import QuotaBackend
 
 // MARK: - Agent Visibility
 // 把「侧边栏隐藏某个 agent 入口」同步到所有聚合统计界面（用量统计 / 调用分析 / 仪表盘 / 菜单栏）。
-// 唯一桥接点：AppSection（侧边栏隐藏键）↔ 数据源标识（CallSourceKind / 本地 cost provider id）。
-// 隐藏状态来源: AppSettings.hiddenSidebarSections（存 AppSection.rawValue）。
+// 唯一桥接点：AppSection（侧边栏隐藏键）↔ 数据源标识（CallSourceKind / 本地 cost provider id /
+// 官方配额 provider id）。隐藏状态来源: AppSettings.hiddenSidebarSections。
+// 隐藏只影响展示，不删除菜单栏固定偏好；重新显示后原选择仍在。
 
 /// 三个 CLI agent（数据源）的统一标识，避免各界面各写一份 Claude/Codex/OpenCode 平行表示。
 enum AgentKind: String, CaseIterable {
@@ -64,5 +65,39 @@ enum AgentVisibility {
     /// 被隐藏 agent 对应的调用分析来源集合。
     static func hiddenCallSources(hidden: Set<String>) -> Set<CallSourceKind> {
         Set(AgentKind.allCases.filter { isHidden($0, hidden: hidden) }.map(\.callSourceKind))
+    }
+
+    /// Catalog / live provider id → owning agent. Cursor 等订阅源没有对应侧边栏 agent。
+    static func agent(forProviderId id: String) -> AgentKind? {
+        switch id {
+        case "claude": return .claude
+        case "codex", "codex-cost": return .codex
+        case "opencode": return .opencode
+        default: return nil
+        }
+    }
+
+    static func isProviderHidden(_ providerId: String, hidden: Set<String>) -> Bool {
+        guard let agent = agent(forProviderId: providerId) else { return false }
+        return isHidden(agent, hidden: hidden)
+    }
+
+    /// Claude / Codex / OpenCode 本地账本在目录里的 id。未刷新时 live category
+    /// 可能是 nil，不能靠 `category != local-cost` 把它们当成配额账号。
+    static func isLocalCostCatalogId(_ providerId: String) -> Bool {
+        switch providerId {
+        case "claude", "codex-cost", "opencode": return true
+        default: return false
+        }
+    }
+
+    static func isQuotaAccount(providerId: String, category: String?) -> Bool {
+        if isLocalCostCatalogId(providerId) { return false }
+        return category != ProviderCategory.localCost
+    }
+
+    static func isCostAccount(providerId: String, category: String?) -> Bool {
+        if isLocalCostCatalogId(providerId) { return true }
+        return category == ProviderCategory.localCost
     }
 }
