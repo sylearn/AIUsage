@@ -41,17 +41,12 @@ extension QuotaHTTPServer {
         }
 
         var mutableBody = request.body
-        var mutableHeaders = request.headers
-        if let interceptor = config.interceptor {
-            let _ = interceptor.intercept(
-                path: cleanPath,
-                headers: &mutableHeaders,
-                body: &mutableBody
-            )
-        }
+        let mutableHeaders = request.headers
 
-        // Parse request metadata, apply model alias mapping, and inject
-        // missing thinking blocks before building the upstream request.
+        // Strict passthrough: forward cache_control, system-in-messages,
+        // thinking blocks, and tool schemas unchanged. The only body rewrite
+        // is a stable `model` alias / forced-model swap, which is not part of
+        // the Anthropic prompt-cache prefix (tools → system → messages).
         var isStreaming = false
         var requestModel = "unknown"
         var upstreamModel = "unknown"
@@ -73,30 +68,6 @@ extension QuotaHTTPServer {
                     upstreamModel = mapped
                     json["model"] = mapped
                     bodyModified = true
-                }
-            }
-
-            let hoisted = hoistSystemMessages(in: &json)
-            if hoisted > 0 {
-                bodyModified = true
-                httpLog.debug("Hoisted \(hoisted) system message(s) from messages[] to top-level system")
-            }
-
-            // Claude Science 发的 `thinking.type` 是 "auto"，而 Anthropic 兼容上游
-            // （DeepSeek `/anthropic`、SuCloud 等）只认 enabled / disabled / adaptive，
-            // 收到 "auto" 直接 400。这里把非法值归一为 adaptive（语义最接近「模型自决」）。
-            if normalizeThinkingType(in: &json) {
-                bodyModified = true
-                httpLog.debug("Normalized thinking.type to a value the upstream accepts")
-            }
-
-            if thinkingIsActive(in: json),
-               let messages = json["messages"] as? [[String: Any]] {
-                let result = injectMissingThinkingBlocks(messages)
-                if result.injected > 0 {
-                    json["messages"] = result.messages
-                    bodyModified = true
-                    httpLog.debug("Injected empty thinking blocks into \(result.injected) assistant message(s)")
                 }
             }
 
@@ -522,140 +493,6 @@ extension QuotaHTTPServer {
         case 400..<500: return "invalid_request_error"
         default: return "api_error"
         }
-    }
-
-    // MARK: - Lean System Prompt Normalization
-
-    /// Claude Code 2.1.154+ ("Lean System Prompt Now Default") emits
-    /// `role: "system"` entries inside the `messages[]` array. The Anthropic
-    /// spec only allows `system` as a top-level field — strict upstreams
-    /// (DeepSeek `/anthropic`, SuCloud, etc.) reject anything other than
-    /// `user`/`assistant` in messages with a 400. This hoists those entries
-    /// into the top-level `system` field (as text blocks, preserving
-    /// `cache_control`) and removes them from `messages`. Returns the number
-    /// of system messages hoisted.
-    func hoistSystemMessages(in json: inout [String: Any]) -> Int {
-        guard let messages = json["messages"] as? [[String: Any]] else { return 0 }
-
-        var hoistedBlocks: [[String: Any]] = []
-        var remaining: [[String: Any]] = []
-        var systemCount = 0
-        for message in messages {
-            if (message["role"] as? String) == "system" {
-                systemCount += 1
-                hoistedBlocks.append(contentsOf: systemTextBlocks(from: message["content"]))
-            } else {
-                remaining.append(message)
-            }
-        }
-
-        // Always strip system entries from messages — leaving even an empty or
-        // non-text one behind still trips the strict upstream's 400.
-        guard systemCount > 0 else { return 0 }
-
-        // Only rewrite the top-level system when there is actual text to carry
-        // over; normalize the existing value to text blocks and append the
-        // hoisted blocks after it to preserve ordering.
-        if !hoistedBlocks.isEmpty {
-            var merged: [[String: Any]] = []
-            if let existing = json["system"] as? String, !existing.isEmpty {
-                merged.append(["type": "text", "text": existing])
-            } else if let existing = json["system"] as? [[String: Any]] {
-                merged.append(contentsOf: existing)
-            }
-            merged.append(contentsOf: hoistedBlocks)
-            json["system"] = merged
-        }
-
-        json["messages"] = remaining
-        return systemCount
-    }
-
-    /// Extracts Anthropic-compatible text blocks from a system message's
-    /// content, which may be a plain string or an array of content blocks.
-    /// Only text blocks are kept (system supports text only); `cache_control`
-    /// is preserved so prompt-cache breakpoints survive the hoist.
-    private func systemTextBlocks(from content: Any?) -> [[String: Any]] {
-        if let text = content as? String {
-            return text.isEmpty ? [] : [["type": "text", "text": text]]
-        }
-        if let blocks = content as? [[String: Any]] {
-            return blocks.compactMap { block in
-                guard (block["type"] as? String) == "text" else { return nil }
-                var out: [String: Any] = ["type": "text", "text": block["text"] as? String ?? ""]
-                if let cacheControl = block["cache_control"] {
-                    out["cache_control"] = cacheControl
-                }
-                return out
-            }
-        }
-        return []
-    }
-
-    // MARK: - DeepSeek Thinking Block Injection
-
-    /// Returns true when the request's `thinking` parameter is active
-    /// (enabled / adaptive / budget-based). Disabled and absent both
-    /// return false — we only inject blocks when the caller already
-    /// opted into thinking mode.
-    private func thinkingIsActive(in json: [String: Any]) -> Bool {
-        guard let thinking = json["thinking"] as? [String: Any],
-              let type = thinking["type"] as? String else {
-            return false
-        }
-        return type != "disabled"
-    }
-
-    /// Anthropic 兼容上游只接受 `thinking.type ∈ {enabled, disabled, adaptive}`。
-    /// Claude Science 会发 `"auto"`（或其它变体），直接透传会被上游判 400。
-    /// 这里把任何非法取值归一为 `adaptive`（语义 = 让模型自行决定是否思考）。
-    /// 返回是否发生了改写。
-    private func normalizeThinkingType(in json: inout [String: Any]) -> Bool {
-        guard var thinking = json["thinking"] as? [String: Any],
-              let type = thinking["type"] as? String else {
-            return false
-        }
-        let allowed: Set<String> = ["enabled", "disabled", "adaptive"]
-        guard !allowed.contains(type) else { return false }
-        thinking["type"] = "adaptive"
-        json["thinking"] = thinking
-        return true
-    }
-
-    /// DeepSeek (and compatible gateways like SuCloud) require every
-    /// assistant message that contains `tool_use` to also carry a
-    /// `thinking` content block — otherwise the API returns 400.
-    /// Claude Code strips thinking blocks from conversation history,
-    /// so we re-inject an empty placeholder where needed.
-    private func injectMissingThinkingBlocks(
-        _ messages: [[String: Any]]
-    ) -> (messages: [[String: Any]], injected: Int) {
-        var result: [[String: Any]] = []
-        var injected = 0
-
-        for var message in messages {
-            guard (message["role"] as? String) == "assistant",
-                  var content = message["content"] as? [[String: Any]] else {
-                result.append(message)
-                continue
-            }
-
-            let hasToolUse = content.contains { ($0["type"] as? String) == "tool_use" }
-            let hasThinking = content.contains {
-                let t = $0["type"] as? String
-                return t == "thinking" || t == "redacted_thinking"
-            }
-
-            if hasToolUse && !hasThinking {
-                content.insert(["type": "thinking", "thinking": ""], at: 0)
-                message["content"] = content
-                injected += 1
-            }
-
-            result.append(message)
-        }
-
-        return (result, injected)
     }
 
     // MARK: - Usage Coercion & Estimation Fallbacks

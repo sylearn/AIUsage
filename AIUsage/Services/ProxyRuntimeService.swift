@@ -467,11 +467,6 @@ final class ProxyRuntimeService {
             environment["ANTHROPIC_UPSTREAM_URL"] = config.anthropicBaseURL
             environment["ANTHROPIC_UPSTREAM_KEY"] = config.anthropicAPIKey
             environment["ANTHROPIC_API_KEY"] = config.effectiveClientKey
-            let upstreamLower = config.anthropicBaseURL.lowercased()
-            if upstreamLower.contains("anyrouter.top")
-                || upstreamLower.contains("a-ocnfniawgw.cn-shanghai.fcapp.run") {
-                environment["ENABLE_THINKING_REWRITE"] = "1"
-            }
             // Node runtimes receive exact model IDs from product gateways.
             // Alias resolution here would map a second time and violate the
             // Node / product boundary.
