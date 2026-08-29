@@ -353,52 +353,50 @@ final class GlobalProxyManager: ObservableObject {
         return true
     }
 
-    /// Updates one Desktop picker capability without changing the public route
-    /// identity. The active gateway and selected profile are refreshed through
-    /// the same hot-switch notification used for node changes.
+    /// 声明/取消节点某个上游模型的 1M 上下文能力。
+    ///
+    /// 能力存在节点上（`ProxyConfiguration.modelCatalog.supports1MModels`），Code 与 Desktop
+    /// 共用同一份声明，所以写成功后要让**两条轨道**都热下发新目录——只刷一条会让另一条继续
+    /// 拿旧能力表对外声明。两轨的 GlobalProxyConfig 是各自独立的文件，这里不碰它们。
     @discardableResult
-    func updateClaudeDesktopSupports1M(
+    static func applyNodeSupports1M(
         nodeID: String,
         modelID: String,
         enabled: Bool
     ) async -> Bool {
-        guard track == .desktop, !isBusy else { return false }
-        operationError = nil
-        let previousCapabilities = config.claudeDesktopSupports1MByNode
-        var byNode = config.claudeDesktopSupports1MByNode ?? [:]
-        var models = byNode[nodeID] ?? [:]
-        if enabled {
-            models[modelID] = true
-        } else {
-            models.removeValue(forKey: modelID)
-        }
-        if models.isEmpty {
-            byNode.removeValue(forKey: nodeID)
-        } else {
-            byNode[nodeID] = models
-        }
-        config.claudeDesktopSupports1MByNode = byNode
-        guard persist() else {
-            config.claudeDesktopSupports1MByNode = previousCapabilities
-            operationError = AppSettings.shared.t(
-                "Could not save the Desktop model capability.",
-                "无法保存 Desktop 模型能力。"
-            )
-            return false
+        let claudeTracks = [GlobalProxyManager.claude, GlobalProxyManager.desktop]
+        guard claudeTracks.allSatisfy({ !$0.isBusy }) else { return false }
+        guard ProxyViewModel.shared.setSupports1M(
+            nodeID: nodeID,
+            modelID: modelID,
+            enabled: enabled
+        ) else { return false }
+
+        var failure: String?
+        for manager in claudeTracks {
+            manager.operationError = nil
+            guard manager.config.isEnabled,
+                  manager.config.activeNodeId == nodeID,
+                  manager.runtime.isProcessRunning else { continue }
+            await manager.reapplyActiveUpstream()
+            if let error = manager.operationError { failure = error }
         }
 
-        guard config.isEnabled,
-              config.activeNodeId == nodeID,
-              runtime.isProcessRunning else { return true }
-        await reapplyActiveUpstream()
-        if let failure = operationError {
-            config.claudeDesktopSupports1MByNode = previousCapabilities
-            _ = persist()
-            await reapplyActiveUpstream()
-            operationError = failure
-            return false
+        guard let failure else { return true }
+        // 至少一条轨道没接受新目录：回滚声明并把两轨拉回与磁盘一致的状态，避免「UI 说开了、
+        // 运行中的代理还按旧目录对外声明」这种半生效。
+        _ = ProxyViewModel.shared.setSupports1M(
+            nodeID: nodeID,
+            modelID: modelID,
+            enabled: !enabled
+        )
+        for manager in claudeTracks where manager.config.isEnabled
+            && manager.config.activeNodeId == nodeID
+            && manager.runtime.isProcessRunning {
+            await manager.reapplyActiveUpstream()
         }
-        return true
+        claudeTracks.forEach { $0.operationError = failure }
+        return false
     }
 
     /// Changes the public model surface exposed to Claude Desktop while

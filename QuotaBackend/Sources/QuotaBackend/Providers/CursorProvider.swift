@@ -310,12 +310,12 @@ public struct CursorProvider: ProviderFetcher, CredentialAcceptingProvider {
         guard let requestURL = URL(string: url) else {
             throw ProviderError("invalid_url", "Cursor API URL is invalid.")
         }
-        var request = URLRequest(url: requestURL, timeoutInterval: timeoutSeconds)
+        var request = QuotaHTTP.request(url: requestURL, timeout: timeoutSeconds)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await QuotaHTTP.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode == 401 || http.statusCode == 403 {
             throw ProviderError("invalid_credentials", "Cursor session cookie expired. Please log in again.")
         }

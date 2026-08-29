@@ -297,6 +297,46 @@ class ProxyViewModel: ObservableObject {
 
     func loadConfigurations() {
         configurations = profileStore.profiles.map { $0.metadata.proxy.toProxyConfiguration(metadata: $0.metadata) }
+        migrateLegacyDesktopSupports1M()
+    }
+
+    /// 把旧版存在 Desktop 轨配置里的 1M 声明搬到节点上，然后清空遗留字段。
+    ///
+    /// 用并集而非覆盖，且只在真正发生变化时落盘——重复执行无副作用，节点上已有的新声明
+    /// 也不会被旧档回退。
+    private func migrateLegacyDesktopSupports1M() {
+        var legacy = GlobalProxyStore.load(track: .desktop)
+        guard let byNode = legacy.claudeDesktopSupports1MByNode, !byNode.isEmpty else { return }
+
+        for (nodeID, _) in byNode {
+            let declared = legacy.legacyClaudeDesktopSupports1MModels(for: nodeID)
+            guard !declared.isEmpty,
+                  let index = configurations.firstIndex(where: { $0.id == nodeID }),
+                  var profile = profileStore.profile(for: nodeID) else { continue }
+            let merged = configurations[index].modelCatalog.supports1MModels.union(declared)
+            guard merged != configurations[index].modelCatalog.supports1MModels else { continue }
+            profile.metadata.proxy.modelCatalog.supports1MModels = merged
+            guard profileStore.save(profile) else { continue }
+            configurations[index].modelCatalog.supports1MModels = merged
+        }
+
+        // 刻意只读写磁盘、不碰 GlobalProxyManager.desktop：本方法可能在 ProxyViewModel
+        // 初始化期间运行，此时去触发另一个单例的构造是自找的初始化顺序问题。代价是若该
+        // 单例已加载并在之后 persist()，遗留字段会被写回一次——迁移是并集且幂等，下次启动
+        // 再搬一遍即收敛。
+        // 只有节点侧都写成功才清遗留字段，否则下次启动还能再搬一次。
+        let unmigrated = byNode.keys.filter { nodeID in
+            let declared = legacy.legacyClaudeDesktopSupports1MModels(for: nodeID)
+            guard !declared.isEmpty else { return false }
+            guard let node = configurations.first(where: { $0.id == nodeID }) else {
+                // 节点已被删除，这份声明没有归属可搬，不该永久阻塞迁移。
+                return false
+            }
+            return !declared.isSubset(of: node.modelCatalog.supports1MModels)
+        }
+        guard unmigrated.isEmpty else { return }
+        legacy.claudeDesktopSupports1MByNode = nil
+        _ = GlobalProxyStore.save(legacy, track: .desktop)
     }
 
     @discardableResult
@@ -308,6 +348,38 @@ class ProxyViewModel: ObservableObject {
     @discardableResult
     func saveProfile(_ profile: NodeProfile) -> Bool {
         return profileStore.save(profile)
+    }
+
+    /// 声明/取消某个上游模型的 1M 上下文能力。
+    ///
+    /// 刻意不走 `updateConfiguration` / `updateProfile`：那两条路会先停掉再重建节点运行时，
+    /// 而这里改的只是「对外声明的目录」，不影响进程该怎么跑。调用方负责在写成功后让相关
+    /// 轨道热下发新目录（`GlobalProxyManager.applyNodeSupports1M`）。
+    @discardableResult
+    func setSupports1M(nodeID: String, modelID: String, enabled: Bool) -> Bool {
+        let model = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty,
+              let index = configurations.firstIndex(where: { $0.id == nodeID }) else { return false }
+
+        var updated = configurations[index].modelCatalog.supports1MModels
+        if enabled {
+            updated.insert(model)
+        } else {
+            updated.remove(model)
+        }
+        guard updated != configurations[index].modelCatalog.supports1MModels else { return true }
+
+        // 以盘上 profile 为基底改写，而不是从 ProxyConfiguration 反向重建：profile 里有
+        // 不进 ProxyConfiguration 的字段，重建会把它们抹掉。
+        guard var profile = profileStore.profile(for: nodeID) else { return false }
+        let previous = configurations[index].modelCatalog.supports1MModels
+        profile.metadata.proxy.modelCatalog.supports1MModels = updated
+        configurations[index].modelCatalog.supports1MModels = updated
+        guard profileStore.save(profile) else {
+            configurations[index].modelCatalog.supports1MModels = previous
+            return false
+        }
+        return true
     }
 
     func saveActivatedId() {

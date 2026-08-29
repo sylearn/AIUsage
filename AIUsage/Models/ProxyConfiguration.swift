@@ -238,16 +238,24 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     struct ModelCatalog: Codable, Equatable {
         var models: [String]
         var pricingOverrides: [String: ModelPricing]
+        /// 声明支持 1M 上下文窗口的上游模型名。上游 `/v1/models` 从不返回 1M 标识，
+        /// 所以这只能由用户声明；它是「节点里那个模型」的能力，Code / Desktop 共用同一份。
+        /// 按上游真实模型名存键——路由改名不会把能力挪到别的模型上。
+        var supports1MModels: Set<String>
 
         private enum CodingKeys: String, CodingKey {
-            case models, pricingOverrides
+            case models, pricingOverrides, supports1MModels
         }
 
         static var empty: ModelCatalog {
             ModelCatalog(models: [], pricingOverrides: [:])
         }
 
-        init(models: [String] = [], pricingOverrides: [String: ModelPricing] = [:]) {
+        init(
+            models: [String] = [],
+            pricingOverrides: [String: ModelPricing] = [:],
+            supports1MModels: Set<String> = []
+        ) {
             var seen = Set<String>()
             var normalizedModels = models
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -265,6 +273,13 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
 
             self.models = normalizedModels
             self.pricingOverrides = normalizedPricing
+            // 刻意不把 1M 名字并进 models：一个能力标记不该凭空造出一个模型。反过来也不
+            // 按 models 过滤——上游目录临时缺一个模型时，用户的声明不该被悄悄丢掉。
+            self.supports1MModels = Set(
+                supports1MModels
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
         }
 
         init(from decoder: Decoder) throws {
@@ -274,7 +289,10 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
                 pricingOverrides: try container.decodeIfPresent(
                     [String: ModelPricing].self,
                     forKey: .pricingOverrides
-                ) ?? [:]
+                ) ?? [:],
+                supports1MModels: Set(
+                    try container.decodeIfPresent([String].self, forKey: .supports1MModels) ?? []
+                )
             )
         }
 
@@ -282,6 +300,8 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(models, forKey: .models)
             try container.encode(pricingOverrides, forKey: .pricingOverrides)
+            // 排序后再写，保证同一份数据每次落盘字节一致（避免无意义的文件 diff）。
+            try container.encode(supports1MModels.sorted(), forKey: .supports1MModels)
         }
 
         init(mappedModels: [MappedModel]) {
@@ -318,7 +338,13 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         }
 
         mutating func mergeModels(_ names: [String]) {
-            self = ModelCatalog(models: models + names, pricingOverrides: pricingOverrides)
+            // 必须带上 supports1MModels：模型目录刷新走的就是这里，漏传会把用户声明的
+            // 1M 能力静默清空。
+            self = ModelCatalog(
+                models: models + names,
+                pricingOverrides: pricingOverrides,
+                supports1MModels: supports1MModels
+            )
         }
     }
 
@@ -487,9 +513,11 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             ?? LegacyModelMapping(current: defaultMapping)
         modelMapping = legacyMapping.current
         if let currentCatalog = try container.decodeIfPresent(ModelCatalog.self, forKey: .modelCatalog) {
+            // 同 NodeProfile：逐字段重建必须带上 supports1MModels，漏传等于每次读档清空 1M 声明。
             modelCatalog = ModelCatalog(
                 models: currentCatalog.models,
-                pricingOverrides: currentCatalog.pricingOverrides
+                pricingOverrides: currentCatalog.pricingOverrides,
+                supports1MModels: currentCatalog.supports1MModels
             )
         } else {
             let legacyLibrary = try container.decodeIfPresent([MappedModel].self, forKey: .modelLibrary) ?? []
@@ -556,6 +584,12 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
 
     var needsProxyProcess: Bool {
         true
+    }
+
+    /// 本节点声明支持 1M 上下文的上游模型。Code 与 Desktop 读同一份——1M 是模型的能力，
+    /// 不是某个客户端的偏好。
+    var supports1MModels: Set<String> {
+        modelCatalog.supports1MModels
     }
 
     /// Exact upstream model IDs accepted by the node runtime. Product

@@ -136,7 +136,7 @@ extension DroidProvider {
         body: [String: Any]?,
         auth: DroidAuth
     ) async throws -> [String: Any] {
-        var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+        var request = QuotaHTTP.request(url: url, timeout: timeoutSeconds)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -154,7 +154,7 @@ extension DroidProvider {
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await QuotaHTTP.data(for: request)
         if let http = response as? HTTPURLResponse {
             if http.statusCode == 401 || http.statusCode == 403 {
                 throw ProviderError("invalid_credentials", "Droid login state is invalid or expired.")

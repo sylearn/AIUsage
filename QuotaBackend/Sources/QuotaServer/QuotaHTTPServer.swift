@@ -511,9 +511,23 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
     func handleConnection(_ connection: NWConnection) async {
         connection.start(queue: .global())
-        guard let requestData = await receiveData(connection) else {
+        let requestData: Data
+        switch await receiveData(connection) {
+        case .none:
             connection.cancel()
             return
+        case .tooLarge(let limit):
+            let response = claudeErrorResponse(
+                type: "request_too_large",
+                message: "Request exceeds the \(limit / (1024 * 1024))MB proxy limit",
+                status: 413,
+                headers: Self.corsHeaders
+            )
+            await sendResponse(connection, response: response)
+            connection.cancel()
+            return
+        case .complete(let data):
+            requestData = data
         }
 
         let request = normalizeClaudeRoute(parseHTTPRequest(requestData))
@@ -975,34 +989,48 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         return HTTPResponse(status: status, headers: h, body: body)
     }
 
-    private func receiveData(_ connection: NWConnection) async -> Data? {
-        // Support larger payloads (up to 10MB) with chunked reading
-        let maxSize = 10 * 1024 * 1024 // 10MB
+    enum ReceivedRequest {
+        case complete(Data)
+        case tooLarge(limit: Int)
+    }
+
+    /// A 1M-token context is already ~4MB of JSON before tool schemas and
+    /// inline images, so the ceiling has to leave room above that.
+    static let maxRequestSize = 64 * 1024 * 1024
+
+    private func receiveData(_ connection: NWConnection) async -> ReceivedRequest? {
+        let maxSize = Self.maxRequestSize
         let headerSeparator = Data([13, 10, 13, 10])
         var accumulated = Data()
+        // Total request size once the headers declare a Content-Length. Reading
+        // to that figure is what keeps a large body intact: stopping at the cap
+        // instead would hand the router a truncated body, which surfaces only as
+        // an unexplained JSON decode failure.
+        var expectedTotal: Int?
 
-        while accumulated.count < maxSize {
+        while true {
+            if let expectedTotal, accumulated.count >= expectedTotal { break }
+            if accumulated.count > maxSize { return .tooLarge(limit: maxSize) }
             guard let chunk = await receiveChunk(connection) else {
                 break
             }
             accumulated.append(chunk)
 
-            // Check if we have a complete HTTP request (headers + body)
-            if let headerRange = accumulated.range(of: headerSeparator) {
+            // Scanning stops once the header block is in hand, so a multi-megabyte
+            // body is never re-scanned chunk after chunk.
+            if expectedTotal == nil, let headerRange = accumulated.range(of: headerSeparator) {
                 let headerText = String(data: accumulated[..<headerRange.lowerBound], encoding: .utf8) ?? ""
-                if let contentLength = extractContentLength(from: headerText) {
-                    let bodySize = accumulated.count - headerRange.upperBound
-                    if bodySize >= contentLength {
-                        break
-                    }
-                } else {
-                    // No Content-Length, assume complete once headers are fully received.
+                guard let contentLength = extractContentLength(from: headerText) else {
+                    // No Content-Length: the headers are the whole request.
                     break
                 }
+                let total = headerRange.upperBound + contentLength
+                if total > maxSize { return .tooLarge(limit: maxSize) }
+                expectedTotal = total
             }
         }
 
-        return accumulated.isEmpty ? nil : accumulated
+        return accumulated.isEmpty ? nil : .complete(accumulated)
     }
 
     private func receiveChunk(_ connection: NWConnection) async -> Data? {

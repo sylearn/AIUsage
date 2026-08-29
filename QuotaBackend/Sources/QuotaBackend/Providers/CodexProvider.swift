@@ -600,7 +600,10 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     }
 
     private func requestUsage(creds: Credentials, url: URL) async throws -> [String: Any] {
-        var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+        // The usage URL is identical for every account; identity lives in the
+        // headers below. Cached responses would leak across accounts, so this
+        // goes through the cache-free quota session.
+        var request = QuotaHTTP.request(url: url, timeout: timeoutSeconds)
         request.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("AIUsage", forHTTPHeaderField: "User-Agent")
@@ -608,7 +611,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await QuotaHTTP.data(for: request)
         if let http = response as? HTTPURLResponse {
             if http.statusCode == 401 || http.statusCode == 403 {
                 throw ProviderError("unauthorized", "Codex OAuth token is invalid or expired.")

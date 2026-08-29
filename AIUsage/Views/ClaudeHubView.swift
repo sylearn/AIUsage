@@ -145,6 +145,7 @@ private struct ClaudeCodeRoutingView: View {
     @State private var showSettingsEditor = false
     @State private var showSettingsHelp = false
     @State private var showModelHelp = false
+    @State private var showModelCapability = false
     @State private var selectedNodeID = ""
     @State private var effortLevel: ClaudeCodePersistentEffort = .auto
     @State private var effortError: String?
@@ -344,7 +345,14 @@ private struct ClaudeCodeRoutingView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Color.indigo.opacity(0.10)))
+                    let contextCount = selectedNode.supports1MModels.count
+                    if contextCount > 0 {
+                        Text("\(contextCount) × 1M")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                modelCapabilityButton
                 Button { showModelHelp.toggle() } label: {
                     Image(systemName: "questionmark.circle")
                         .font(.system(size: 15, weight: .semibold))
@@ -402,6 +410,38 @@ private struct ClaudeCodeRoutingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16).fill(AppSurface.card(colorScheme)))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppStroke.card(colorScheme), lineWidth: 1))
+        .sheet(isPresented: $showModelCapability) {
+            if let selectedNode {
+                ClaudeNodeModelCapabilitySheet(
+                    nodeID: selectedNode.id,
+                    productName: "Code",
+                    brand: .indigo
+                )
+            }
+        }
+    }
+
+    /// 与 Desktop 页面同一个入口：1M 是节点能力，两处打开的是同一份数据。
+    private var modelCapabilityButton: some View {
+        Button {
+            showModelCapability = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(L("Model settings", "模型设置"))
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+            .foregroundStyle(Color.indigo)
+            .padding(.horizontal, 9)
+            .frame(height: 29)
+            .background(Capsule().fill(Color.indigo.opacity(0.085)))
+            .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(selectedNode == nil)
+        .opacity(selectedNode == nil ? 0.5 : 1)
+        .help(L("Configure model capabilities (1M context)", "配置模型能力（1M 上下文）"))
     }
 
     private var codeModelHelpPopover: some View {
@@ -477,7 +517,7 @@ struct ClaudeDesktopIntegrationView: View {
         return ClaudeDesktopProfileStore.catalog(
             for: selectedNode,
             mode: catalogMode,
-            supports1M: gateway.config.claudeDesktopSupports1MModels(for: selectedNode.id),
+            supports1M: selectedNode.supports1MModels,
             routes: gateway.config.effectiveClaudeDesktopModels(for: selectedNode)
         )
     }
@@ -526,7 +566,11 @@ struct ClaudeDesktopIntegrationView: View {
         }
         .sheet(isPresented: $showModelManager) {
             if let selectedNode {
-                ClaudeDesktopModelManagerSheet(node: selectedNode)
+                ClaudeNodeModelCapabilitySheet(
+                    nodeID: selectedNode.id,
+                    productName: "Desktop",
+                    brand: Self.brand
+                )
             }
         }
     }
@@ -1041,18 +1085,29 @@ struct ClaudeDesktopIntegrationView: View {
     }
 }
 
-private struct ClaudeDesktopModelManagerSheet: View {
+/// 节点模型能力编辑器。1M 是节点里那个上游模型的能力，不是某个客户端的偏好，所以
+/// Code 与 Desktop 打开的是同一个 sheet、写的是同一份数据（`node.supports1MModels`）。
+private struct ClaudeNodeModelCapabilitySheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject private var gateway = GlobalProxyManager.desktop
-    let node: ProxyConfiguration
+    @ObservedObject private var proxyViewModel = ProxyViewModel.shared
+    let nodeID: String
+    /// 打开此表的产品名（仅用于文案；能力本身两轨共用）。
+    let productName: String
+    let brand: Color
 
     @State private var searchText = ""
     @State private var enabled1M: Set<String> = []
     @State private var showHelp = false
+    @State private var isSaving = false
+
+    private var node: ProxyConfiguration? {
+        proxyViewModel.configurations.first { $0.id == nodeID }
+    }
 
     private var catalog: [ClaudeDesktopCatalogEntry] {
-        ClaudeDesktopProfileStore.realCatalog(
+        guard let node else { return [] }
+        return ClaudeDesktopProfileStore.realCatalog(
             for: node,
             supports1M: enabled1M
         )
@@ -1080,26 +1135,29 @@ private struct ClaudeDesktopModelManagerSheet: View {
         .frame(width: 720, height: 600)
         .appPageChrome(colorScheme)
         .onAppear {
-            enabled1M = gateway.config.claudeDesktopSupports1MModels(for: node.id)
+            enabled1M = node?.supports1MModels ?? []
         }
     }
 
     private var sheetHeader: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "macwindow.and.cursorarrow")
+            Image(systemName: "cpu")
                 .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(ClaudeDesktopIntegrationView.brand)
+                .foregroundStyle(brand)
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(ClaudeDesktopIntegrationView.brand.opacity(0.12))
+                        .fill(brand.opacity(0.12))
                 )
             VStack(alignment: .leading, spacing: 4) {
-                Text(L("Desktop model catalog", "Desktop 模型目录"))
+                Text(L("Node model capability", "节点模型能力"))
                     .font(.title3.weight(.bold))
-                Text(node.name)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Text(L(
+                    "\(node?.name ?? "") · shared by Code and Desktop",
+                    "\(node?.name ?? "") · Code 与 Desktop 共用"
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
             Spacer()
             Button {
@@ -1136,9 +1194,9 @@ private struct ClaudeDesktopModelManagerSheet: View {
                     HStack(spacing: 12) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(ClaudeDesktopIntegrationView.brand)
+                            .foregroundStyle(brand)
                             .frame(width: 30, height: 30)
-                            .background(Circle().fill(ClaudeDesktopIntegrationView.brand.opacity(0.10)))
+                            .background(Circle().fill(brand.opacity(0.10)))
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(model.displayName)
@@ -1167,24 +1225,24 @@ private struct ClaudeDesktopModelManagerSheet: View {
                                     enabled1M.remove(model.upstreamModel)
                                 }
                                 Task {
-                                    let saved = await gateway.updateClaudeDesktopSupports1M(
-                                        nodeID: node.id,
+                                    isSaving = true
+                                    let saved = await GlobalProxyManager.applyNodeSupports1M(
+                                        nodeID: nodeID,
                                         modelID: model.upstreamModel,
                                         enabled: enabled
                                     )
+                                    isSaving = false
                                     if !saved {
-                                        if enabled {
-                                            enabled1M.remove(model.upstreamModel)
-                                        } else {
-                                            enabled1M.insert(model.upstreamModel)
-                                        }
+                                        // 写盘或热下发失败时把开关拨回去，别让 UI 显示一个
+                                        // 实际没生效的状态。
+                                        enabled1M = node?.supports1MModels ?? enabled1M
                                     }
                                 }
                             }
                         ))
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                        .disabled(gateway.isBusy)
+                        .disabled(isSaving)
                         .accessibilityLabel(L(
                             "Offer 1M-context variant for \(model.displayName)",
                             "为 \(model.displayName) 提供 1M 上下文版本"
@@ -1214,7 +1272,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text(L("Real node models", "节点真实模型"))
+            Text(L("Real node models · opened from \(productName)", "节点真实模型 · 从 \(productName) 打开"))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Spacer()
@@ -1230,8 +1288,8 @@ private struct ClaudeDesktopModelManagerSheet: View {
             Text(L("Model settings", "模型设置"))
                 .font(.headline)
             Text(L(
-                "This list manages the node's real Desktop models and 1M capability. Application route mappings are configured on the main Desktop page.",
-                "此处管理节点在 Desktop 中可用的真实模型及 1M 能力；应用模型映射请在 Desktop 主页面设置。"
+                "1M capability belongs to the node's upstream model, so Code and Desktop share one declaration — changing it here applies to both. Route mappings are configured on each product's own page.",
+                "1M 能力属于节点的上游模型，Code 与 Desktop 共用同一份声明——在此修改对两者同时生效。应用模型映射请在各自产品页面设置。"
             ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1240,8 +1298,8 @@ private struct ClaudeDesktopModelManagerSheet: View {
             Text("1M")
                 .font(.caption.weight(.semibold))
             Text(L(
-                "Enable only for targets that truly support a 1M context window. Capability changes refresh Desktop automatically.",
-                "仅为确实支持 1M 上下文的目标开启；能力变化会自动刷新 Desktop。"
+                "Upstream model listings never carry a 1M marker, so this cannot be detected — you declare it. Enable only for models that truly accept a 1M context window; enabling it on one that does not makes the client offer a variant the upstream will reject.",
+                "上游模型列表从不返回 1M 标识，因此这件事无法自动探测，只能由你声明。仅为确实支持 1M 上下文窗口的模型开启；给不支持的模型开启，只会让客户端提供一个上游会拒绝的变体。"
             ))
                 .font(.caption)
                 .foregroundStyle(.secondary)

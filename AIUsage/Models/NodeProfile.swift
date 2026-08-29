@@ -473,9 +473,11 @@ struct ProxySettings: Codable, Equatable {
             ProxyConfiguration.ModelCatalog.self,
             forKey: .modelCatalog
         ) {
+            // 逐字段重建时必须带上 supports1MModels，否则每次启动读档都会清空 1M 声明。
             modelCatalog = .init(
                 models: currentCatalog.models,
-                pricingOverrides: currentCatalog.pricingOverrides
+                pricingOverrides: currentCatalog.pricingOverrides,
+                supports1MModels: currentCatalog.supports1MModels
             )
         } else {
             let legacyLibrary = try container.decodeIfPresent(

@@ -133,13 +133,13 @@ public struct MiniMaxProvider: ProviderFetcher, CredentialAcceptingProvider {
 
         for endpoint in candidates {
             guard let url = URL(string: endpoint) else { continue }
-            var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+            var request = QuotaHTTP.request(url: url, timeout: timeoutSeconds)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
 
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await QuotaHTTP.data(for: request)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                     lastError = ProviderError("http_error", "MiniMax Token Plan request failed (HTTP \(http.statusCode)).")
                     continue

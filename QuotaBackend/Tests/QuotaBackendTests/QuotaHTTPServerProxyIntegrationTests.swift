@@ -2251,6 +2251,72 @@ final class QuotaHTTPServerProxyIntegrationTests: XCTestCase {
         XCTAssertEqual(upstreamRequest.headers["x-api-key"], "upstream-anthropic-key")
     }
 
+    func testAnthropicPassthrough1MVariantSendsBetaAndBaseModel() async throws {
+        let upstreamPort = try findFreePort()
+        let upstream = MockHTTPServer(port: upstreamPort) { _ in
+            try MockHTTPResponse.json(
+                object: [
+                    "id": "msg_1m",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [["type": "text", "text": "ok"]],
+                    "model": "claude-sonnet-4-5-20250929",
+                    "stop_reason": "end_turn",
+                    "stop_sequence": NSNull(),
+                    "usage": ["input_tokens": 8, "output_tokens": 2],
+                ]
+            )
+        }
+        try await upstream.start()
+        defer { upstream.stop() }
+
+        let proxyPort = try findFreePort()
+        let server = QuotaHTTPServer(
+            host: "127.0.0.1",
+            port: proxyPort,
+            proxyConfig: ClaudeProxyConfiguration(
+                enabled: true,
+                bindPort: proxyPort,
+                mode: .anthropicPassthrough,
+                upstreamBaseURL: "http://127.0.0.1:\(upstreamPort)",
+                upstreamAPIKey: "upstream-anthropic-key",
+                expectedClientKey: "client-key"
+            )
+        )
+        try await server.start()
+        defer { server.stop() }
+
+        var request = makeClaudeMessagesRequest(proxyPort: proxyPort, clientKey: "client-key")
+        request.setValue("interleaved-thinking-2025-05-14", forHTTPHeaderField: "anthropic-beta")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: [
+                "model": "claude-sonnet-4-5-20250929\(ClaudeContext1M.variantSuffix)",
+                "messages": [["role": "user", "content": "Say hello"]],
+                "max_tokens": 64,
+                "stream": false,
+            ]
+        )
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        let recorded = await upstream.recordedRequests()
+        let upstreamRequest = try XCTUnwrap(recorded.first)
+        let betas = Set(
+            (upstreamRequest.headers["anthropic-beta"] ?? "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        )
+        XCTAssertTrue(betas.contains(ClaudeContext1M.beta))
+        XCTAssertTrue(betas.contains("interleaved-thinking-2025-05-14"))
+
+        let body = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: upstreamRequest.body) as? [String: Any]
+        )
+        // Anthropic rejects the bracketed id as an unknown model.
+        XCTAssertEqual(body["model"] as? String, "claude-sonnet-4-5-20250929")
+    }
+
     func testAnthropicPassthroughStreamingPreservesMultiToolEventBoundaries() async throws {
         let upstreamPort = try findFreePort()
         let upstreamBody = """

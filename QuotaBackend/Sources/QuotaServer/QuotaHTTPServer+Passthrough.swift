@@ -69,6 +69,17 @@ extension QuotaHTTPServer {
                     json["model"] = mapped
                     bodyModified = true
                 }
+            } else if !config.availableModels.contains(requestModel) {
+                // Even strict passthrough has to drop a `[1m]` suffix: Anthropic
+                // gates 1M context on `anthropic-beta` (added below) and treats
+                // the bracketed id as an unknown model. Catalogs that publish a
+                // literal `…[1m]` name are matched above and left alone.
+                let base = ClaudeContext1M.baseModel(requestModel)
+                if base != requestModel {
+                    upstreamModel = base
+                    json["model"] = base
+                    bodyModified = true
+                }
             }
 
             if bodyModified, let rewritten = try? JSONSerialization.data(withJSONObject: json) {
@@ -96,6 +107,14 @@ extension QuotaHTTPServer {
         }
         if mutableHeaders["content-type"] == nil {
             upstreamReq.setValue("application/json", forHTTPHeaderField: "content-type")
+        }
+        // A `[1m]` model selection is how the client asks for 1M context; upstream
+        // only honours it as a beta. Merge so the client's own betas survive.
+        if ClaudeContext1M.requestsVariant(requestModel) {
+            upstreamReq.setValue(
+                ClaudeContext1M.mergingBeta(into: mutableHeaders["anthropic-beta"]),
+                forHTTPHeaderField: "anthropic-beta"
+            )
         }
 
         if isStreaming {

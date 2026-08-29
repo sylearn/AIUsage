@@ -87,6 +87,9 @@ final class OpenCodeNodeStore: ObservableObject {
 
     var configPath: String { configManager.configPath }
 
+    /// True when `opencode.jsonc` exists, which makes OpenCode ignore `opencode.json`.
+    var usesJSONC: Bool { configManager.usesJSONC }
+
     // MARK: - CRUD
 
     func upsert(_ node: OpenCodeNode) {

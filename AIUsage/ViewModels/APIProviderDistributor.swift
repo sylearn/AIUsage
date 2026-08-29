@@ -294,9 +294,12 @@ final class APIProviderDistributor {
             let retainedLocalPricing = proxy.modelCatalog.pricingOverrides.filter {
                 providerNames.contains($0.key)
             }
+            // 1M 声明与定价同口径保留：供应商已不再提供的模型，其能力标记也就没有意义了。
+            let retainedLocal1M = proxy.modelCatalog.supports1MModels.filter(providerNames.contains)
             proxy.modelCatalog = .init(
                 models: providerCatalog.models,
-                pricingOverrides: retainedLocalPricing
+                pricingOverrides: retainedLocalPricing,
+                supports1MModels: retainedLocal1M
             )
         }
         if wins(APIProviderSharedKey.defaultModel) {

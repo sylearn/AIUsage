@@ -129,11 +129,22 @@ extension OpenCodeManagementView {
     }
 
     private var configFileButton: some View {
-        actionBarButton(
-            title: "opencode.json",
+        // OpenCode reads opencode.jsonc in preference to opencode.json, so the
+        // button has to name whichever file is actually live.
+        let fileName = (store.configPath as NSString).lastPathComponent
+        return actionBarButton(
+            title: fileName,
             icon: "doc.text.magnifyingglass",
             role: .file,
-            help: L("View and edit the live opencode.json with syntax highlighting.", "查看并编辑当前生效的 opencode.json（语法高亮）。")
+            help: store.usesJSONC
+                ? L(
+                    "View and edit the live \(fileName) with syntax highlighting. OpenCode prefers opencode.jsonc, so opencode.json is ignored while this file exists.",
+                    "查看并编辑当前生效的 \(fileName)（语法高亮）。OpenCode 优先读取 opencode.jsonc，该文件存在时 opencode.json 会被忽略。"
+                )
+                : L(
+                    "View and edit the live \(fileName) with syntax highlighting.",
+                    "查看并编辑当前生效的 \(fileName)（语法高亮）。"
+                )
         ) {
             showConfigFileEditor = true
         }

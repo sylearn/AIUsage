@@ -252,6 +252,89 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(config.mapToUpstreamModel(generatedRoute), "gpt-5.4")
     }
 
+    func test1MVariantSelectionResolvesToItsOwnUpstreamModel() throws {
+        let upstreams = ["gpt-5.4", "provider/long-sonnet", "provider/speed-haiku"]
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            availableModels: upstreams,
+            defaultModel: "gpt-5.4",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            catalogSupports1M: ["provider/long-sonnet"]
+        )
+
+        let longContextRoute = try XCTUnwrap(
+            config.scienceCatalogModels.first(where: { $0.upstreamModel == "provider/long-sonnet" })?.id
+        )
+        // The `[1m]` marker must not push the selection into the generated-ID
+        // fallback, which would answer with the node default instead.
+        XCTAssertEqual(config.mapToUpstreamModel(longContextRoute), "provider/long-sonnet")
+        XCTAssertEqual(
+            config.mapToUpstreamModel(longContextRoute + ClaudeContext1M.variantSuffix),
+            "provider/long-sonnet"
+        )
+    }
+
+    func test1MVariantOfStableTierRouteStillMapsToTier() {
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "upstream-opus",
+            middleModel: "upstream-sonnet",
+            smallModel: "upstream-haiku",
+            mapDesktopTierRoutes: true
+        )
+
+        XCTAssertEqual(
+            config.mapToUpstreamModel(ScienceModelProtocolAdapter.opusRouteID + "[1m]"),
+            "upstream-opus"
+        )
+        XCTAssertEqual(
+            ScienceModelProtocolAdapter.productTier(for: ScienceModelProtocolAdapter.haikuRouteID + "[1M]"),
+            .haiku
+        )
+    }
+
+    func testLiteral1MCatalogModelIsNotRewritten() {
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            availableModels: ["claude-sonnet-4-5[1m]"],
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .code
+        )
+
+        // Gateways that publish the suffix as part of a real model name keep it.
+        XCTAssertEqual(
+            config.mapToUpstreamModel("claude-sonnet-4-5[1m]"),
+            "claude-sonnet-4-5[1m]"
+        )
+    }
+
+    func test1MBetaMergePreservesClientBetas() {
+        XCTAssertEqual(
+            ClaudeContext1M.mergingBeta(into: nil),
+            ClaudeContext1M.beta
+        )
+        XCTAssertEqual(
+            ClaudeContext1M.mergingBeta(into: "interleaved-thinking-2025-05-14"),
+            "interleaved-thinking-2025-05-14,\(ClaudeContext1M.beta)"
+        )
+        XCTAssertEqual(
+            ClaudeContext1M.mergingBeta(into: " \(ClaudeContext1M.beta) , fine-grained-tool-streaming-2025-05-14 "),
+            "\(ClaudeContext1M.beta),fine-grained-tool-streaming-2025-05-14"
+        )
+        XCTAssertTrue(ClaudeContext1M.requestsVariant("claude-opus-5[1m]"))
+        XCTAssertFalse(ClaudeContext1M.requestsVariant("claude-opus-5"))
+        XCTAssertEqual(ClaudeContext1M.baseModel("claude-opus-5[1m]"), "claude-opus-5")
+    }
+
     func testDesktopStableTierRoutesMapThroughCurrentGatewayNode() {
         let routes = [
             ScienceModelProtocolAdapter.defaultRouteID,

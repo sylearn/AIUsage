@@ -147,6 +147,7 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
                 ClaudeDesktopProfileStore.gatewayProjection(
                     for: node,
                     mode: mode,
+                    supports1M: node.supports1MModels,
                     routes: codeModels,
                     productRouteIDs: mode == .smartRoutes
                         ? [
@@ -166,7 +167,7 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
                 ClaudeDesktopProfileStore.gatewayProjection(
                     for: node,
                     mode: mode,
-                    supports1M: config.claudeDesktopSupports1MModels(for: node.id),
+                    supports1M: node.supports1MModels,
                     routes: desktopModels
                 ),
                 "desktop",

@@ -251,7 +251,7 @@ public struct KiroProvider: MultiAccountProviderFetcher, CredentialAcceptingProv
             throw ProviderError("invalid_url", "Failed to build the Kiro usage URL.")
         }
 
-        var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+        var request = QuotaHTTP.request(url: url, timeout: timeoutSeconds)
         request.httpMethod = "GET"
         request.setValue("Bearer \(tokenData.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("q.\(tokenData.region).amazonaws.com", forHTTPHeaderField: "Host")
@@ -260,7 +260,7 @@ public struct KiroProvider: MultiAccountProviderFetcher, CredentialAcceptingProv
         request.setValue(UUID().uuidString.lowercased(), forHTTPHeaderField: "amz-sdk-invocation-id")
         request.setValue("attempt=1; max=1", forHTTPHeaderField: "amz-sdk-request")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await QuotaHTTP.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             return UsageAPIResult(statusCode: 0, response: nil)
         }

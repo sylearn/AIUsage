@@ -221,6 +221,14 @@ struct OpenCodeNodeEditorView: View {
 
             fieldLabel(L("API Key", "API Key"), required: false)
             SecureKeyField("sk-...", text: $node.apiKey)
+            if !node.proxyEnabled {
+                Text(L(
+                    "Stored in ~/.local/share/opencode/auth.json (0600) on activation, the same place `opencode auth login` uses. opencode.json keeps only baseURL and models.",
+                    "激活时写入 ~/.local/share/opencode/auth.json（0600），与 `opencode auth login` 同一位置；opencode.json 只保留 baseURL 与模型。"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            }
 
             connectivityRow
         }

@@ -146,7 +146,7 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
         guard let copilotURL = URL(string: "https://api.github.com/copilot_internal/user") else {
             throw ProviderError("invalid_url", "GitHub Copilot API URL is invalid.")
         }
-        var request = URLRequest(url: copilotURL, timeoutInterval: timeoutSeconds)
+        var request = QuotaHTTP.request(url: copilotURL, timeout: timeoutSeconds)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(Self.editorPluginVersion, forHTTPHeaderField: "Editor-Plugin-Version")
@@ -154,7 +154,7 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
         request.setValue(Self.editorPluginVersion, forHTTPHeaderField: "User-Agent")
         request.setValue(Self.githubApiVersion, forHTTPHeaderField: "X-Github-Api-Version")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await QuotaHTTP.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode == 401 || http.statusCode == 403 {
             throw ProviderError("invalid_credentials", "GitHub token is invalid or lacks Copilot access.")
         }
@@ -170,24 +170,24 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
 
     private func fetchGitHubEmail(token: String) async -> String? {
         guard let url = URL(string: "https://api.github.com/user") else { return nil }
-        var req = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+        var req = QuotaHTTP.request(url: url, timeout: timeoutSeconds)
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("token \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(Self.editorPluginVersion, forHTTPHeaderField: "User-Agent")
 
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
+        guard let (data, _) = try? await QuotaHTTP.data(for: req),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
 
         if let email = json["email"] as? String, !email.isEmpty { return email }
 
         // Try /user/emails
         guard let emailsURL = URL(string: "https://api.github.com/user/emails") else { return nil }
-        var emailsReq = URLRequest(url: emailsURL, timeoutInterval: timeoutSeconds)
+        var emailsReq = QuotaHTTP.request(url: emailsURL, timeout: timeoutSeconds)
         emailsReq.setValue("application/json", forHTTPHeaderField: "Accept")
         emailsReq.setValue("token \(token)", forHTTPHeaderField: "Authorization")
         emailsReq.setValue(Self.editorPluginVersion, forHTTPHeaderField: "User-Agent")
 
-        guard let (emailsData, _) = try? await URLSession.shared.data(for: emailsReq),
+        guard let (emailsData, _) = try? await QuotaHTTP.data(for: emailsReq),
               let emails = try? JSONSerialization.jsonObject(with: emailsData) as? [[String: Any]] else { return nil }
 
         return emails.first(where: { ($0["primary"] as? Bool) == true && ($0["verified"] as? Bool) == true })?["email"] as? String

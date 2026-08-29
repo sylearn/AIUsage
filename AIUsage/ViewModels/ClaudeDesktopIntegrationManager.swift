@@ -164,7 +164,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         let catalog = ClaudeDesktopProfileStore.catalog(
             for: node,
             mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-            supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
+            supports1M: node.supports1MModels,
             routes: gateway.config.effectiveClaudeDesktopModels(for: node)
         )
         guard !catalog.isEmpty else {
@@ -329,7 +329,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             let catalog = ClaudeDesktopProfileStore.catalog(
                 for: node,
                 mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-                supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
+                supports1M: node.supports1MModels,
                 routes: gateway.config.effectiveClaudeDesktopModels(for: node)
             )
             let diskIDs = profileStore.appliedModelIDs()
@@ -362,7 +362,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         let catalog = ClaudeDesktopProfileStore.catalog(
             for: node,
             mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-            supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
+            supports1M: node.supports1MModels,
             routes: gateway.config.effectiveClaudeDesktopModels(for: node)
         )
         guard !catalog.isEmpty else {

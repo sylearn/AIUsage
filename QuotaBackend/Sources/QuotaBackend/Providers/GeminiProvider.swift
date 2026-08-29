@@ -385,10 +385,10 @@ public struct GeminiProvider: ProviderFetcher, CredentialAcceptingProvider {
 
     private func discoverProjectId(accessToken: String) async -> String? {
         guard let url = URL(string: Self.projectsURL) else { return nil }
-        var request = URLRequest(url: url, timeoutInterval: Self.optionalRequestTimeout)
+        var request = QuotaHTTP.request(url: url, timeout: Self.optionalRequestTimeout)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
+        guard let (data, _) = try? await QuotaHTTP.data(for: request),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let projects = json["projects"] as? [[String: Any]] else { return nil }
 

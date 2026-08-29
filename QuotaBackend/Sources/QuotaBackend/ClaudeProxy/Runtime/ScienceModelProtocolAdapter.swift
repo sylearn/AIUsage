@@ -64,7 +64,7 @@ public struct ScienceModelProtocolAdapter: Sendable {
     }
 
     public static func productTier(for model: String) -> ProductTier? {
-        switch model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        switch ClaudeContext1M.baseModel(model).lowercased() {
         case defaultRouteID, legacyDefaultRouteID:
             return .defaultRoute
         case opusRouteID, legacyOpusRouteID:
@@ -157,8 +157,21 @@ public struct ScienceModelProtocolAdapter: Sendable {
         if acceptingRawUpstreamIDs, upstreamModels.contains(requestModel) {
             return requestModel
         }
-        if requestModel.hasPrefix(Self.generatedIDPrefix)
-            || requestModel.contains("-aiusage-v1-") {
+        // A `[1m]` selection is the long-context variant of a published id, so
+        // it has to resolve to that id's upstream model. Without this the
+        // generated-ID fallback below would swallow it and silently answer with
+        // the node's default model instead of the one the user picked.
+        let base = ClaudeContext1M.baseModel(requestModel)
+        if base != requestModel {
+            if let upstream = upstreamBySelectionID[base] {
+                return upstream
+            }
+            if acceptingRawUpstreamIDs, upstreamModels.contains(base) {
+                return base
+            }
+        }
+        if base.hasPrefix(Self.generatedIDPrefix)
+            || base.contains("-aiusage-v1-") {
             return defaultUpstreamModel
         }
         return nil

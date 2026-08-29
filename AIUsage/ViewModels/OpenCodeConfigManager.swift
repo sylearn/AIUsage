@@ -14,6 +14,8 @@ import QuotaBackend
 //          存在 opencode.jsonc 时优先接管它（OpenCode 实际读取的文件）。
 // 工作方式: 激活前把「干净原文逐字备份」到 <配置>.aiusage.bak（备份即真相源，重复激活幂等），
 //          还原即整文覆盖回原文。
+// 密钥: 直连模式的上游 API Key 走 OpenCode 官方位置 ~/.local/share/opencode/auth.json（0600，
+//       见 OpenCodeAuthStore），受管块不写明文 apiKey；auth.json 写不动时回退内联（issue #65）。
 // JSONC: 接管 opencode.jsonc 时——逐字备份原文 → 以备份原文为基底，用 JSONCEditor 做「保注释的
 //        结构化文本注入」（仅注入/替换 provider[受管键]、顶层 model、$schema），输出仍是带注释的
 //        合法 JSONC（OpenCode 能解析）。即接管期间用户注释也始终保留（issue #42）。
@@ -64,7 +66,16 @@ final class OpenCodeConfigManager {
         key == providerIdPrefix || key.hasPrefix(providerIdPrefix + "-")
     }
 
+    /// 受管块里的 API Key 落在哪。
+    enum ManagedAPIKeyPlacement {
+        /// 交给 ~/.local/share/opencode/auth.json（0600），配置里不出现明文 key（issue #65）。
+        case externalAuthFile
+        /// 内联进 provider options。用于自带配置的启动命令导出，以及 auth.json 写不动时的兜底。
+        case inlineOptions
+    }
+
     private let fileManager = FileManager.default
+    private let authStore = OpenCodeAuthStore.shared
 
     // MARK: - Paths
 
@@ -124,16 +135,27 @@ final class OpenCodeConfigManager {
             throw OpenCodeConfigError.nodeIncomplete
         }
 
+        // 密钥先落 auth.json（0600），再写配置。代理模式下受管块放的是 client key，不算密钥，
+        // 但仍要清掉本节点可能残留的直连凭据——auth.json 里的 key 会覆盖配置里的。
+        let directAPIKey = baseURLOverride == nil ? node.apiKey.nilIfBlank : nil
+        let credentials = directAPIKey.map { [node.managedProviderId: $0] } ?? [:]
+        let credentialsStored = authStore.syncManagedCredentials(credentials)
+        let keyPlacement: ManagedAPIKeyPlacement = credentialsStored ? .externalAuthFile : .inlineOptions
+        if !credentialsStored {
+            openCodeConfigLog.error("auth.json write failed, falling back to inline apiKey in opencode config")
+        }
+
         let pristine = try establishBackupAndLoadPristine()
         let root = injectManagedEntries(
             into: mergedBase(pristine: pristine, commonSettings: commonSettings),
             node: node,
             defaultModel: defaultModel,
-            baseURLOverride: baseURLOverride
+            baseURLOverride: baseURLOverride,
+            keyPlacement: keyPlacement
         )
 
         try writeManagedRoot(root)
-        openCodeConfigLog.info("opencode config managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count), jsonc=\(self.usesJSONC, privacy: .public))")
+        openCodeConfigLog.info("opencode config managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count), jsonc=\(self.usesJSONC, privacy: .public), keyInAuthFile=\(keyPlacement == .externalAuthFile, privacy: .public))")
     }
 
     // MARK: - Global Unified Proxy Activation
@@ -150,6 +172,10 @@ final class OpenCodeConfigManager {
     /// - virtualModel: 固定虚拟模型名（CLI 永远发它，由代理改写为激活节点真实模型）。
     func activateGlobal(interface: OpenCodeProtocol, baseURL: String, clientKey: String, virtualModel: String) throws {
         let model = virtualModel.nilIfBlank ?? "model"
+
+        // 受管块放的是 client key（代理鉴权用，非上游密钥），留在配置里即可；但要清掉
+        // per-node 直连留下的凭据，否则 auth.json 里的 key 会覆盖它。
+        authStore.removeManagedCredentials()
 
         // 备份即真相源（与 per-node activate 同语义，幂等）。
         var root = try establishBackupAndLoadPristine()
@@ -198,7 +224,11 @@ final class OpenCodeConfigManager {
     // MARK: - Managed Block Building
 
     /// 受管 provider 条目（写进 provider[managedProviderId] 的值）。激活与编辑器 JSON 预览共用。
-    func managedProviderEntry(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
+    func managedProviderEntry(
+        node: OpenCodeNode,
+        baseURLOverride: String? = nil,
+        keyPlacement: ManagedAPIKeyPlacement = .externalAuthFile
+    ) -> [String: Any] {
         // 每模型独立定价写入各自的 cost 块（USD/百万 token，CNY 录入按近似汇率折算），
         // OpenCode 据此把费用算进 opencode.db——金额单一来源，不在本地重复计费。
         let generationOptions = node.modelGenerationOptions
@@ -244,7 +274,7 @@ final class OpenCodeConfigManager {
             // 代理模式：真实 Key 留在代理进程环境里，配置里只放客户端 Key（设了则代理据此鉴权），
             // 留空时回退占位符（AI SDK 各包都需要非空 apiKey 才不会去找环境变量）。
             options["apiKey"] = node.expectedClientKey.nilIfBlank ?? "aiusage-proxy"
-        } else if let apiKey = node.apiKey.nilIfBlank {
+        } else if let apiKey = node.apiKey.nilIfBlank, keyPlacement == .inlineOptions {
             options["apiKey"] = apiKey
         }
 
@@ -261,7 +291,8 @@ final class OpenCodeConfigManager {
         into cleanRoot: [String: Any],
         node: OpenCodeNode,
         defaultModel: String,
-        baseURLOverride: String?
+        baseURLOverride: String?,
+        keyPlacement: ManagedAPIKeyPlacement = .externalAuthFile
     ) -> [String: Any] {
         var root = cleanRoot
         if root["$schema"] == nil {
@@ -269,7 +300,11 @@ final class OpenCodeConfigManager {
         }
         let managedId = node.managedProviderId
         var provider = root["provider"] as? [String: Any] ?? [:]
-        provider[managedId] = managedProviderEntry(node: node, baseURLOverride: baseURLOverride)
+        provider[managedId] = managedProviderEntry(
+            node: node,
+            baseURLOverride: baseURLOverride,
+            keyPlacement: keyPlacement
+        )
         root["provider"] = provider
         root["model"] = "\(managedId)/\(defaultModel)"
         return root
@@ -288,12 +323,18 @@ final class OpenCodeConfigManager {
 
     /// 编辑器 JSON 预览：激活该节点后 opencode.json 的完整内容（基于备份/当前原文合成，不落盘）。
     /// 节点缺默认模型时顶层 model 留空字符串占位，仅供预览。
-    func previewMergedConfig(node: OpenCodeNode, baseURLOverride: String? = nil, commonSettings: [String: Any]? = nil) -> [String: Any] {
+    func previewMergedConfig(
+        node: OpenCodeNode,
+        baseURLOverride: String? = nil,
+        commonSettings: [String: Any]? = nil,
+        keyPlacement: ManagedAPIKeyPlacement = .externalAuthFile
+    ) -> [String: Any] {
         previewMergedConfig(
             node: node,
             baseURLOverride: baseURLOverride,
             commonSettings: commonSettings,
-            pristine: pristineConfig()
+            pristine: pristineConfig(),
+            keyPlacement: keyPlacement
         )
     }
 
@@ -303,13 +344,15 @@ final class OpenCodeConfigManager {
         node: OpenCodeNode,
         baseURLOverride: String?,
         commonSettings: [String: Any]?,
-        pristine: [String: Any]
+        pristine: [String: Any],
+        keyPlacement: ManagedAPIKeyPlacement = .externalAuthFile
     ) -> [String: Any] {
         injectManagedEntries(
             into: mergedBase(pristine: pristine, commonSettings: commonSettings),
             node: node,
             defaultModel: node.effectiveDefaultModel ?? "",
-            baseURLOverride: baseURLOverride
+            baseURLOverride: baseURLOverride,
+            keyPlacement: keyPlacement
         )
     }
 
@@ -320,10 +363,12 @@ final class OpenCodeConfigManager {
     /// `OPENCODE_CONFIG="<path>" opencode`。代理模式节点指向本地代理（需代理在运行）。
     func makeLaunchCommand(node: OpenCodeNode, commonSettings: [String: Any]? = nil) throws -> String {
         guard node.isComplete else { throw OpenCodeConfigError.nodeIncomplete }
+        // 导出的是自带凭据的独立配置（0600），不依赖 auth.json 里有没有本节点的项。
         let merged = previewMergedConfig(
             node: node,
             baseURLOverride: node.proxyEnabled ? node.proxyLocalBaseURL : nil,
-            commonSettings: commonSettings
+            commonSettings: commonSettings,
+            keyPlacement: .inlineOptions
         )
         let home = fileManager.homeDirectoryForCurrentUser.path
         let dir = (home as NSString).appendingPathComponent(".config/aiusage/opencode-configs")
@@ -345,7 +390,9 @@ final class OpenCodeConfigManager {
     // MARK: - Deactivation
 
     /// 还原 opencode.json：有备份则整文覆盖回原文并删除备份；无备份则剥离受管块（必要时删文件）。
+    /// 同时清掉 auth.json 里的受管凭据——密钥不该在停用后留在盘上。
     func restore() throws {
+        authStore.removeManagedCredentials()
         if hasBackup {
             do {
                 let data = try Data(contentsOf: URL(fileURLWithPath: backupPath))

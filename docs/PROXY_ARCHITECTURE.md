@@ -205,6 +205,20 @@ AIUsage/
 
 Passthrough 模式下，请求头原样传递（替换 `x-api-key` 为上游密钥），支持 `anthropic-beta` 等特殊头。
 
+#### 1M 上下文变体
+
+`/v1/models` 用 `supports1m: true` 声明能力，客户端随后以 `<model id>[1m]` 请求长上下文变体。上游不认这个后缀——Anthropic 用 `anthropic-beta: context-1m-2025-08-07` 开启 1M 上下文，带方括号的 id 会被当成未知模型。转换由 `ClaudeContext1M` 统一处理：
+
+| 环节 | 行为 |
+|------|------|
+| `ScienceModelProtocolAdapter.resolveRequestModel` | 精确 id 未命中时回退到去掉 `[1m]` 的基础 id，避免落进「generated ID → 节点默认模型」兜底 |
+| `ClaudeProxyConfiguration.mapToUpstreamModel` | 同上；目录里真有字面量 `…[1m]` 模型名时保留不动 |
+| `handlePassthroughProxy` | 改写 body 里的 `model` 去掉后缀，并把 1M beta 合并进 `anthropic-beta`（保留客户端自带的 interleaved-thinking 等 beta） |
+
+请求体上限为 64MB（`QuotaHTTPServer.maxRequestSize`）：1M token 上下文本身约 4MB JSON，加上 tool schema 与内联图片会更大。超限直接返回 413，不再截断转发——截断只会以「JSON 解析失败」的形式暴露，无法定位。
+
+**开关在哪**：上游模型列表从不携带 1M 标识，能力只能由用户声明。声明存在节点上（`ProxyConfiguration.modelCatalog.supports1MModels`，按上游真实模型名存键），Code / Desktop / Science 三轨共用同一份：Code 与 Desktop 页面的「模型设置」打开同一个节点模型能力表（`ClaudeNodeModelCapabilitySheet`），改动经 `GlobalProxyManager.applyNodeSupports1M` 写入节点并对两条在跑的轨道热下发；Science 在启动 env（`AIUSAGE_CLAUDE_SUPPORTS_1M_JSON`）与热切换 payload（`catalogSupports1M`）里携带同一份声明。旧版存在 Desktop 轨配置里的 `claudeDesktopSupports1MByNode` 由 `ProxyViewModel.migrateLegacyDesktopSupports1M` 一次性并集迁移到节点后清空。
+
 ### 4. Canonical 中间层 — 统一协议桥接
 
 这是当前生产主链路的核心，所有协议转换都经过 Canonical 层。

@@ -467,7 +467,11 @@ struct ProxyPricingRulesEditor: View {
                 pricing[draft.id] = rule
             }
         }
-        catalog = .init(models: catalog.models, pricingOverrides: pricing)
+        catalog = .init(
+            models: catalog.models,
+            pricingOverrides: pricing,
+            supports1MModels: catalog.supports1MModels
+        )
     }
 
     private func convertRules(to newCurrency: ProxyConfiguration.PricingCurrency) {

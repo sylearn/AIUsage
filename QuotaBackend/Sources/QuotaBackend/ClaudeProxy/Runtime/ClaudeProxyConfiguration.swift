@@ -171,7 +171,20 @@ public struct ClaudeProxyConfiguration: Sendable {
             }
             return requestModel
         }
-        return mapTierRouteToUpstream(requestModel)
+        // The literal id lost, so a trailing `[1m]` is this proxy's own
+        // long-context marker rather than part of an upstream name. Route on the
+        // base id; the 1M request itself travels as an `anthropic-beta` value.
+        let base = ClaudeContext1M.baseModel(requestModel)
+        if base != requestModel,
+           preferExactCatalogModels,
+           availableModels.contains(base) {
+            if mapDesktopTierRoutes,
+               ScienceModelProtocolAdapter.isStableProductTierRoute(base) {
+                return mapTierRouteToUpstream(base)
+            }
+            return base
+        }
+        return mapTierRouteToUpstream(base)
     }
 
     private func mapTierRouteToUpstream(_ requestModel: String) -> String {

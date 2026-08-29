@@ -202,7 +202,12 @@ opencode.db ──复制 db/-wal/-shm 到临时目录──► SQLite 只读查�
   - 注入受管键 `provider["aiusage-<节点 slug>"]`（`npm: "@ai-sdk/openai-compatible"` + baseURL/apiKey/models）+ 顶层 `model: "aiusage-<slug>/<模型>"`；备份 `opencode.json.aiusage.bak`；还原即整文件回滚，重复激活/切换节点幂等（剥离所有 `aiusage*` 前缀键）。
   - **路线 A（消息级节点归因，已实现）**：provider 键按节点区分（`OpenCodeNode.providerSlug`，首次保存生成且改名不变），opencode.db 的消息携带它作为 `providerID`，Phase 1 统计据此把用量/费用归因到具体节点，无需代理。
   - JSON 结构化读写（`JSONSerialization`，pretty + sortedKeys）；检测到 `opencode.jsonc`（无法保真注释）或解析失败时拒绝接管并在 UI 横幅提示。
-  - 配置含 API Key，写入后恢复 0600 权限。
+  - 写入后恢复 0600 权限。
+  - **密钥与配置分离（issue #65）**：直连模式的上游 API Key 不再内联进受管块，而是走 OpenCode 官方位置 `~/.local/share/opencode/auth.json`（`OpenCodeAuthStore`，0600），格式 `{"aiusage-<slug>": {"type": "api", "key": "…"}}`——键名必须与 `opencode.json` 里的 provider 键一致，OpenCode 启动时按 provider id 取凭据注入 SDK。`opencode.json` 只留 `baseURL`/`models`，因此该文件被同步/备份/分享时不含密钥。
+    - 代理模式受管块仍内联 client key（代理鉴权用，非上游密钥）；激活代理模式时会清掉本节点残留的直连凭据，否则 auth.json 里的 key 会覆盖它。
+    - 停用（`restore()`）连带清掉全部 `aiusage*` 凭据，密钥不在停用后留在盘上；用户自己 `opencode auth login` 存的其他 provider 项原样保留。
+    - auth.json 写不动时回退为内联 `apiKey`——否则 OpenCode 拿不到凭据，激活即失效。
+    - 「复制启动命令」导出的是自带凭据的独立配置（0600，`OPENCODE_CONFIG=`），固定内联 key，不依赖 auth.json 里有没有本节点的项。
   - 启动对账：用户手动改回 opencode.json 后自动清除激活标记（`OpenCodeNodeStore.reconcileWithConfigFile`）。
 
 ### 7.3 暂缓项

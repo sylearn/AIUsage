@@ -141,13 +141,13 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
 
         for endpoint in candidates {
             guard let url = URL(string: endpoint) else { continue }
-            var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+            var request = QuotaHTTP.request(url: url, timeout: timeoutSeconds)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
 
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await QuotaHTTP.data(for: request)
                 if let http = response as? HTTPURLResponse {
                     if http.statusCode == 401 || http.statusCode == 403 {
                         // 可能只是区域不匹配（国内 key 打到了全球端点），换下一个端点重试。

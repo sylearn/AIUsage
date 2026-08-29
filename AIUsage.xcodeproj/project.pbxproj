@@ -196,6 +196,7 @@
 		C1NP00092F9C000500A15674 /* ProfileExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00082F9C000500A15674 /* ProfileExportView.swift */; };
 		C1OE00022FB0002000B26789 /* OpenCodeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00012FB0002000B26789 /* OpenCodeNode.swift */; };
 		C1OE00042FB0002000B26789 /* OpenCodeConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */; };
+		C1OE01022FB0002000B26789 /* OpenCodeAuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE01012FB0002000B26789 /* OpenCodeAuthStore.swift */; };
 		C1OE00062FB0002000B26789 /* OpenCodeNodeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */; };
 		C1OE00082FB0002000B26789 /* OpenCodeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */; };
 		C1OE000A2FB0002000B26789 /* OpenCodeNodeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */; };
@@ -413,6 +414,7 @@
 		C1NP00082F9C000500A15674 /* ProfileExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileExportView.swift; sourceTree = "<group>"; };
 		C1OE00012FB0002000B26789 /* OpenCodeNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNode.swift; sourceTree = "<group>"; };
 		C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigManager.swift; sourceTree = "<group>"; };
+		C1OE01012FB0002000B26789 /* OpenCodeAuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAuthStore.swift; sourceTree = "<group>"; };
 		C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStore.swift; sourceTree = "<group>"; };
 		C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagementView.swift; sourceTree = "<group>"; };
 		C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeEditorView.swift; sourceTree = "<group>"; };
@@ -467,6 +469,7 @@
 				C1CX00002FB0000100B26789 /* CodexConfigManager.swift */,
 				C1NP00022F9C000200A15674 /* NodeProfileStore.swift */,
 				C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */,
+				C1OE01012FB0002000B26789 /* OpenCodeAuthStore.swift */,
 				C1JC00012FB0002000B26789 /* JSONCSanitizer.swift */,
 				C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */,
 				C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */,
@@ -945,6 +948,7 @@
 				C1MB00042FB0000400B26789 /* MenuBarView+CostTracking.swift in Sources */,
 				C1OE00022FB0002000B26789 /* OpenCodeNode.swift in Sources */,
 				C1OE00042FB0002000B26789 /* OpenCodeConfigManager.swift in Sources */,
+				C1OE01022FB0002000B26789 /* OpenCodeAuthStore.swift in Sources */,
 				C1JC00022FB0002000B26789 /* JSONCSanitizer.swift in Sources */,
 				C1OE00062FB0002000B26789 /* OpenCodeNodeStore.swift in Sources */,
 				C1OE00222FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift in Sources */,
@@ -1231,7 +1235,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.15.12;
+				MARKETING_VERSION = 0.15.13;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1263,7 +1267,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.15.12;
+				MARKETING_VERSION = 0.15.13;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

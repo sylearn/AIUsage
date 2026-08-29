@@ -163,9 +163,9 @@ struct GlobalProxyConfig: Codable, Equatable {
     var claudeDesktopHTTPSPort: Int? = nil
     /// 只供本地 Desktop profile 使用的独立随机 key（配置文件本身为 0600）。
     var claudeDesktopClientKey: String? = nil
-    /// Per-node Desktop catalog preferences keyed by the real upstream model
-    /// ID. Keeping the preference on the upstream identity means a stable
-    /// route rename never silently moves the 1M capability to another model.
+    /// 遗留：1M 能力曾是「Desktop 轨的偏好」，现已提升为节点的模型能力
+    /// （`ProxyConfiguration.modelCatalog.supports1MModels`），Code 与 Desktop 共用一份。
+    /// 保留此字段仅为读旧档并一次性搬迁；迁移完成后置空，不再写入。
     var claudeDesktopSupports1MByNode: [String: [String: Bool]]? = nil
     /// Science 沙箱监听端口（仅 Science 轨；即 `claude-science serve --port`）。缺省 14410（AIUsage 端口族）。
     var sciencePort: Int? = nil
@@ -417,7 +417,9 @@ struct GlobalProxyConfig: Codable, Equatable {
     var claudeDesktopBaseURL: String {
         "https://localhost:\(effectiveClaudeDesktopHTTPSPort)/claude-desktop"
     }
-    func claudeDesktopSupports1MModels(for nodeID: String) -> Set<String> {
+    /// 遗留读取口：1M 能力已迁到节点（`ProxyConfiguration.modelCatalog.supports1MModels`），
+    /// 这里只服务于把旧 Desktop 配置里的声明搬到节点上（见 `migrateLegacySupports1MToNodes`）。
+    func legacyClaudeDesktopSupports1MModels(for nodeID: String) -> Set<String> {
         Set((claudeDesktopSupports1MByNode?[nodeID] ?? [:]).compactMap { model, enabled in
             enabled ? model : nil
         })

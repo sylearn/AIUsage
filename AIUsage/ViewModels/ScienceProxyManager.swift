@@ -171,7 +171,11 @@ final class ScienceProxyManager: ObservableObject {
         String(format: "%.6g", value)
     }
 
-    private func injectCatalog(_ catalog: ScienceModelCatalog, into environment: inout [String: String]) {
+    private func injectCatalog(
+        _ catalog: ScienceModelCatalog,
+        nodeId: String,
+        into environment: inout [String: String]
+    ) {
         let upstreamModels = catalog.models.map(\.upstreamModel)
         if let data = try? JSONEncoder().encode(upstreamModels),
            let json = String(data: data, encoding: .utf8) {
@@ -180,6 +184,22 @@ final class ScienceProxyManager: ObservableObject {
         environment["AIUSAGE_SCIENCE_DEFAULT_MODEL"] = catalog.defaultUpstreamModel
         environment["AIUSAGE_SCIENCE_MODEL_CATALOG"] = "1"
         environment["AIUSAGE_SCIENCE_EXACT_MODELS"] = "1"
+        let exposed1M = exposed1MModels(for: nodeId, catalog: catalog)
+        if !exposed1M.isEmpty,
+           let data = try? JSONEncoder().encode(exposed1M),
+           let json = String(data: data, encoding: .utf8) {
+            environment["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json
+        }
+    }
+
+    /// 本节点声明支持 1M 的模型，与 Code / Desktop 同源（`ProxyConfiguration.supports1MModels`，
+    /// 按上游模型名存键）。过滤到本次实际暴露的目录，避免把已不在目录里的声明发给 daemon。
+    private func exposed1MModels(for nodeId: String, catalog: ScienceModelCatalog) -> [String] {
+        let declared = ProxyViewModel.shared.configurations
+            .first { $0.id == nodeId }?
+            .supports1MModels ?? []
+        guard !declared.isEmpty else { return [] }
+        return catalog.models.map(\.upstreamModel).filter(declared.contains)
     }
 
     private func normalizePersistedSelections(
@@ -395,7 +415,7 @@ final class ScienceProxyManager: ObservableObject {
         // Science 误报「session no longer valid」。因此这里剥掉 client key → 代理对入站鉴权放行、
         // 剥离并忽略 Science 的 Bearer，再注入节点真实上游 key（对齐 CSswitch 的 strip-and-ignore）。
         env.removeValue(forKey: "ANTHROPIC_API_KEY")
-        injectCatalog(catalog, into: &env)
+        injectCatalog(catalog, nodeId: nodeId, into: &env)
 
         if let validationError = endpointValidationError(for: endpoints) {
             operationError = validationError
@@ -594,6 +614,9 @@ final class ScienceProxyManager: ObservableObject {
         }
         payload["availableModels"] = catalog.models.map(\.upstreamModel)
         payload["defaultModel"] = catalog.defaultUpstreamModel
+        // 必须显式下发（哪怕是空数组）：admin 端在字段缺省时沿用当前值，否则切节点会把
+        // 上一个节点的 1M 声明留在运行中的代理上。
+        payload["catalogSupports1M"] = exposed1MModels(for: nodeId, catalog: catalog)
         var acquiredNewLease = false
         do {
             if leasedNodeId != nodeId {
