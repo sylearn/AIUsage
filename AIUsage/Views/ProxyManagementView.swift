@@ -20,6 +20,7 @@ struct ProxyManagementView: View {
     @ObservedObject var openCodeGateway = GlobalProxyManager.opencode
     @ObservedObject var claudeGatewayRuntime = GlobalProxyRuntime.claude
     @ObservedObject var desktopGatewayRuntime = GlobalProxyRuntime.desktop
+    @ObservedObject var codexGatewayRuntime = GlobalProxyRuntime.codex
     @ObservedObject var scienceProxy = ScienceProxyManager.shared
     @State var showingNewConfigEditor = false
     @State var editingConfig: ProxyConfiguration?
@@ -58,6 +59,14 @@ struct ProxyManagementView: View {
     /// 当前家族的激活节点 id（Claude 走 activatedConfigId，Codex 走 activatedCodexConfigId）。
     var familyActivatedId: String? {
         viewModel.activatedId(isCodex: family.isCodex)
+    }
+
+    /// Codex 全局代理启用时，流量走网关选中节点，不算「每节点激活」但仍算已接入。
+    var familyHasActiveRoute: Bool {
+        if family.isCodex, codexGateway.isEnabled {
+            return codexGateway.activeNodeId != nil
+        }
+        return familyActivatedId != nil
     }
 
     /// 把过滤后列表的插入槽位换算为全局 `configurations` 数组下标，保证拖拽重排正确。

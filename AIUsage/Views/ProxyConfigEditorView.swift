@@ -871,6 +871,7 @@ struct ProxyConfigEditorView: View {
                 : profile.metadata.proxy.normalizedUpstreamBaseURL
         )
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(AppSurface.card(colorScheme))

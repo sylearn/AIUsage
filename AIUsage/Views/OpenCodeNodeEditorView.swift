@@ -419,7 +419,7 @@ struct OpenCodeNodeEditorView: View {
     private var modelColumnHeaders: some View {
         HStack(spacing: 6) {
             Text(L("Default", "默认")).frame(width: 30)
-            Text(L("Model ID", "模型 ID")).frame(maxWidth: .infinity, alignment: .leading)
+            Text(L("Model ID", "模型 ID")).frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if showsPriceColumns {
                 Group {
                     Text(L("Input", "输入"))
@@ -459,7 +459,8 @@ struct OpenCodeNodeEditorView: View {
                 TextField("deepseek-chat", text: row.entry.id)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12, design: .monospaced))
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .layoutPriority(1)
                     .autocorrectionDisabled()
 
                 if showsPriceColumns {
@@ -595,6 +596,7 @@ struct OpenCodeNodeEditorView: View {
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11, design: .monospaced))
             .frame(width: 64)
+            .clipped()
     }
 
     private func autoFillCachePrices() {

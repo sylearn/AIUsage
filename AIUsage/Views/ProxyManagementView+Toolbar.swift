@@ -227,7 +227,7 @@ extension ProxyManagementView {
                 title: showsClaudeProductConfiguration || family.isCodex
                     ? L("Active", "已激活") : L("Running", "运行中"),
                 value: showsClaudeProductConfiguration || family.isCodex
-                    ? (familyActivatedId != nil ? "1" : "0")
+                    ? (familyHasActiveRoute ? "1" : "0")
                     : "\(displayConfigs.filter { viewModel.isNodeRuntimeRunning($0.id) }.count)",
                 tint: .green
             )

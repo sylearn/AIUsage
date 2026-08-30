@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Codex Global Proxy Section
 // Codex 轨「全局统一代理」配置卡片：常驻固定端口对外暴露一个稳定入口（端口 + client key + 虚拟模型），
 // Codex CLI 一次性指向它即可。切换激活节点走进程内热替换，CLI 无感（无需重启 / 端口不变）。
-// 启用期间接管 config.toml，并禁用每节点单独激活（节点列表开关由本卡片统一切换激活节点）。
+// 启用期间接管 config.toml；节点列表的接入开关会热切换本卡片的激活节点。
 
 struct CodexGlobalProxySection: View {
     @ObservedObject private var manager = GlobalProxyManager.shared

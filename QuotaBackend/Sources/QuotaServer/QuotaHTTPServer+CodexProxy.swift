@@ -275,7 +275,7 @@ extension QuotaHTTPServer {
     }
 
     /// 从原始请求体中安全读取 model（仅用于日志/映射展示）。
-    private static func peekModel(from body: Data) -> String {
+    static func peekModel(from body: Data) -> String {
         guard let model = (try? requestDecoder.decode(ModelProbe.self, from: body))?.model,
               !model.isEmpty else {
             return "unknown"

@@ -504,6 +504,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         }
         if self.codexProxyService != nil {
             httpLog.info("  POST /v1/responses (Codex Proxy - OpenAI Convert)")
+            httpLog.info("  GET  /v1/responses (Codex Proxy - WebSocket upgrade)")
         }
     }
 
@@ -585,6 +586,14 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                     // 解码失败：交由通用路由按非流式流程返回 400。
                 }
             }
+        }
+
+        if request.method == "GET",
+           cleanPath == "/v1/responses",
+           codexProxyService != nil,
+           QuotaWebSocket.isUpgradeRequest(request.headers) {
+            await handleCodexWebSocketProxy(connection: connection, request: request)
+            return
         }
 
         if request.method == "POST", cleanPath == "/v1/responses", codexProxyService != nil {

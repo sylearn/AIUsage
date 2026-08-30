@@ -291,21 +291,25 @@ struct PricingSourceIndicator: View {
     var width: CGFloat = 70
 
     var body: some View {
-        Group {
+        HStack(spacing: 3) {
             if !pricing.hasAnyRate {
                 Text("—")
                     .foregroundStyle(.tertiary)
             } else if pricing.source?.kind == .modelsDev {
-                Label(L("Public", "公开"), systemImage: "globe")
+                Image(systemName: "globe")
+                Text(L("Public", "公开"))
                     .foregroundStyle(.teal)
-                    .help(pricing.source?.label ?? "models.dev")
             } else {
-                Label(L("Manual", "手动"), systemImage: "pencil")
+                Image(systemName: "pencil")
+                Text(L("Manual", "手动"))
                     .foregroundStyle(.secondary)
             }
         }
         .font(.system(size: 9.5, weight: .medium))
+        .lineLimit(1)
         .frame(width: width, alignment: .leading)
+        .clipped()
+        .help(pricing.source?.label ?? "")
     }
 }
 

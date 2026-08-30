@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os.log
 
@@ -14,6 +15,7 @@ private let codexConfigLog = Logger(subsystem: "com.aiusage.desktop", category: 
 
 enum CodexConfigError: LocalizedError {
     case unreadableConfig
+    case unreadableManagedFile(String)
     case failedToCreateDirectory
     case failedToWriteFile
     case failedToRestore
@@ -22,6 +24,11 @@ enum CodexConfigError: LocalizedError {
         switch self {
         case .unreadableConfig:
             return AppSettings.shared.t("Codex config.toml is unreadable.", "Codex config.toml 无法读取。")
+        case .unreadableManagedFile(let name):
+            return AppSettings.shared.t(
+                "Codex file \(name) is unreadable.",
+                "Codex 文件 \(name) 无法读取。"
+            )
         case .failedToCreateDirectory:
             return AppSettings.shared.t("Failed to create the Codex config directory.", "创建 Codex 配置目录失败。")
         case .failedToWriteFile:
@@ -60,6 +67,21 @@ final class CodexConfigManager {
         configPath + ".aiusage.bak"
     }
 
+    private var authPath: String {
+        let home = fileManager.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".codex/auth.json")
+    }
+
+    private var authBackupPath: String {
+        authPath + ".aiusage.bak"
+    }
+
+    private var authDirWatch: DispatchSourceFileSystemObject?
+    /// 正在把 ChatGPT 登录搬回时忽略目录监视，避免刚还原又被当成登录态重新暂存。
+    private var isRestoringChatGPTAuth = false
+    /// 代理身份写入 auth.json / .env 的 client key。监视回调重写桩时用。
+    private var lastProxyAPIKey: String?
+
     // MARK: - State
 
     /// 当前 config.toml 是否处于受管理（已注入代理）状态。
@@ -75,7 +97,12 @@ final class CodexConfigManager {
 
     // MARK: - Activation
 
-    /// 注入受管理的代理配置：把顶层 model/model_provider 指向 aiusage-proxy，并追加 provider 块。
+    /// 注入受管理的代理配置，并让 live `~/.codex` 只保留节点身份：
+    /// config.toml 指向本地代理；`auth.json` 只含 apikey + 代理 client key（ChatGPT 登录只存在 `.aiusage.bak`）；
+    /// `~/.codex/.env` 写入 `OPENAI_BASE_URL`（本地代理）与同一把 client key。
+    /// 已登录账号时 Codex 会静默忽略自定义 provider 的 base_url（openai/codex#37245）；
+    /// 空桩会打到 `api.openai.com` 且不带 Bearer，报 401 Missing bearer。
+    /// 停用 / 切账号时从备份整文还原 config.toml、auth.json，并去掉 `.env` 托管块。
     /// - Parameters:
     ///   - baseURL: 本地代理地址（含 /v1，Codex 会在其后拼 /responses）。
     ///   - bearerToken: 通过 experimental_bearer_token 直接下发，Codex 以 Bearer 头发给本地代理。
@@ -89,30 +116,60 @@ final class CodexConfigManager {
         globalTOML: String? = nil,
         nodeTOML: String? = nil
     ) throws {
-        // 备份即真相源：若已有备份，原文以备份为准（保证重复激活幂等，不会把脏文件当原文）。
-        let pristine: String?
-        if hasBackup {
-            pristine = (try? String(contentsOfFile: backupPath, encoding: .utf8)) ?? ""
-        } else if fileManager.fileExists(atPath: configPath) {
-            let current = try readConfigIfExists() ?? ""
-            // 防御：万一当前文件里残留旧的受管理块，先剥离再作为原文备份。
-            let clean = stripManagedBlocks(from: current)
-            try writeBackup(clean)
-            pristine = clean
-        } else {
-            pristine = nil
+        let previousProxyAPIKey = lastProxyAPIKey
+        let wasWatching = authDirWatch != nil
+        let merged = mergeBaseFragments(global: globalTOML ?? "", node: nodeTOML ?? "")
+        stopAuthWatch()
+        let snapshots: [ManagedFileSnapshot]
+        do {
+            snapshots = try snapshotManagedFiles()
+        } catch {
+            if wasWatching { startAuthWatch() }
+            throw error
         }
 
-        let merged = mergeBaseFragments(global: globalTOML ?? "", node: nodeTOML ?? "")
-        let injected = injectManagedConfig(
-            into: pristine ?? "",
-            baseURL: baseURL,
-            bearerToken: bearerToken,
-            model: model,
-            baseTopLevel: merged.topLevel,
-            baseTables: merged.tables
-        )
-        try writeConfig(injected)
+        do {
+            // 备份即真相源：若已有备份，原文以备份为准（保证重复激活幂等，不会把脏文件当原文）。
+            let pristine: String?
+            if hasBackup {
+                pristine = try readUTF8File(at: backupPath)
+            } else if fileManager.fileExists(atPath: configPath) {
+                let current = try readConfigIfExists() ?? ""
+                // 防御：万一当前文件里残留旧的受管理块，先剥离再作为原文备份。
+                let clean = stripManagedBlocks(from: current)
+                try writeBackup(clean)
+                pristine = clean
+            } else {
+                pristine = nil
+            }
+
+            let injected = injectManagedConfig(
+                into: pristine ?? "",
+                baseURL: baseURL,
+                bearerToken: bearerToken,
+                model: model,
+                baseTopLevel: merged.topLevel,
+                baseTables: merged.tables
+            )
+            try installProxyAuthIdentity(proxyAPIKey: bearerToken)
+            try writeConfig(injected)
+            try CodexNoProxyFixer.apply(openAIBaseURL: baseURL, openAIAPIKey: bearerToken)
+            lastProxyAPIKey = bearerToken
+            startAuthWatch()
+        } catch {
+            let operationError = error
+            do {
+                try restoreManagedFiles(from: snapshots)
+            } catch {
+                codexConfigLog.error("Failed to roll back Codex activation: \(String(describing: error), privacy: .public)")
+                lastProxyAPIKey = previousProxyAPIKey
+                if wasWatching { startAuthWatch() }
+                throw CodexConfigError.failedToRestore
+            }
+            lastProxyAPIKey = previousProxyAPIKey
+            if wasWatching { startAuthWatch() }
+            throw operationError
+        }
         codexConfigLog.info("Codex config.toml proxy block injected (provider=\(Self.providerId, privacy: .public), baseKeys=\(merged.topLevel.count), baseTables=\(merged.tables.count))")
     }
 
@@ -142,30 +199,58 @@ final class CodexConfigManager {
     // MARK: - Deactivation
 
     /// 还原 config.toml：有备份则整文覆盖回原文并删除备份；无备份则剥离受管理块（必要时删文件）。
+    /// 无论 config 走哪条路径，都把暂存的 ChatGPT `auth.json` 还原回去。
     func restore() throws {
-        if hasBackup {
-            do {
-                let data = try Data(contentsOf: URL(fileURLWithPath: backupPath))
-                try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
-                applyRestrictivePermissions()
-                try? fileManager.removeItem(atPath: backupPath)
-                codexConfigLog.info("Codex config.toml restored from backup")
-            } catch {
-                codexConfigLog.error("Failed to restore Codex config.toml from backup: \(String(describing: error), privacy: .public)")
-                throw CodexConfigError.failedToRestore
-            }
-            return
+        let previousProxyAPIKey = lastProxyAPIKey
+        let wasWatching = authDirWatch != nil
+        let hadManagedBackup = hasBackup
+        stopAuthWatch()
+        let snapshots: [ManagedFileSnapshot]
+        do {
+            snapshots = try snapshotManagedFiles()
+        } catch {
+            if wasWatching { startAuthWatch() }
+            throw error
         }
 
-        // 无备份：可能是我们新建的文件（仅含受管理块），或本就未受管理。
-        guard let current = try readConfigIfExists() else { return }
-        let stripped = stripManagedBlocks(from: current)
-        if stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try? fileManager.removeItem(atPath: configPath)
-            codexConfigLog.info("Codex config.toml removed (was managed-only, no backup)")
-        } else {
-            try writeConfig(stripped)
-            codexConfigLog.info("Codex config.toml managed blocks stripped (no backup)")
+        isRestoringChatGPTAuth = true
+        defer { isRestoringChatGPTAuth = false }
+        do {
+            if hasBackup {
+                let data = try Data(contentsOf: URL(fileURLWithPath: backupPath))
+                try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
+                applyRestrictivePermissions(at: configPath)
+                codexConfigLog.info("Codex config.toml restored from backup")
+            } else if let current = try readConfigIfExists() {
+                // 无备份：可能是我们新建的文件（仅含受管理块），或本就未受管理。
+                let stripped = stripManagedBlocks(from: current)
+                if stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try removeFileIfExists(at: configPath)
+                    codexConfigLog.info("Codex config.toml removed (was managed-only, no backup)")
+                } else {
+                    try writeConfig(stripped)
+                    codexConfigLog.info("Codex config.toml managed blocks stripped (no backup)")
+                }
+            }
+
+            try restoreChatGPTAuthFiles(wroteProxyIdentity: previousProxyAPIKey != nil || hadManagedBackup)
+            try CodexNoProxyFixer.remove()
+            try removeFileIfExists(at: backupPath)
+            try removeFileIfExists(at: authBackupPath)
+            lastProxyAPIKey = nil
+        } catch {
+            let operationError = error
+            do {
+                try restoreManagedFiles(from: snapshots)
+            } catch {
+                codexConfigLog.error("Failed to roll back Codex restore: \(String(describing: error), privacy: .public)")
+                lastProxyAPIKey = previousProxyAPIKey
+                if wasWatching { startAuthWatch() }
+                throw CodexConfigError.failedToRestore
+            }
+            lastProxyAPIKey = previousProxyAPIKey
+            if wasWatching { startAuthWatch() }
+            throw operationError
         }
     }
 
@@ -173,8 +258,8 @@ final class CodexConfigManager {
 
     /// 在干净原文上注入受管理配置。
     /// 结构（保证所有顶层键都在任何 [table] 之前，符合 TOML 语义）：
-    ///   HEADER(model + model_provider) → BASE 顶层键块 → 用户 body（去重）→ BASE 表块 → PROVIDER 块。
-    /// 去重：删除 body 中与受管理块冲突的顶层键（model/model_provider + BASE 顶层键）与同名 [table]，
+    ///   HEADER(model + model_provider + 强制 API 登录) → BASE 顶层键块 → 用户 body（去重）→ BASE 表块 → PROVIDER 块。
+    /// 去重：删除 body 中与受管理块冲突的顶层键（model/model_provider/forced_login_method + BASE 顶层键）与同名 [table]，
     /// 避免 TOML 重复键/重复表解析错误（节点/全局配置在激活态优先生效；停用从备份完整还原）。
     func injectManagedConfig(
         into original: String,
@@ -188,7 +273,8 @@ final class CodexConfigManager {
 
         // 收集 BASE 块要覆盖的顶层键名 / 表头，用于从 body 剥离冲突项。
         let baseKeyNames = Set(baseTopLevel.compactMap { topLevelKeyName(of: $0) })
-        let baseTableHeaders = Set(baseTables.compactMap { firstTableHeader(in: $0) })
+        var conflictTables = Set(baseTables.compactMap { firstTableHeader(in: $0) })
+        conflictTables.insert("model_providers.\(Self.providerId)")
 
         var body: [String] = []
         var seenTable = false
@@ -198,13 +284,13 @@ final class CodexConfigManager {
             if trimmed.hasPrefix("[") {
                 seenTable = true
                 let header = normalizedTableHeader(trimmed)
-                skipTableHeader = baseTableHeaders.contains(header) ? header : nil
+                skipTableHeader = conflictTables.contains(header) ? header : nil
                 if skipTableHeader != nil { continue }
             } else if skipTableHeader != nil {
                 continue // 跳过冲突表内的行
             }
             if !seenTable {
-                if isTopLevelKey(trimmed, key: "model") || isTopLevelKey(trimmed, key: "model_provider") {
+                if isManagedHeaderKey(trimmed) {
                     continue
                 }
                 if let key = topLevelKeyName(of: trimmed), baseKeyNames.contains(key) {
@@ -218,6 +304,10 @@ final class CodexConfigManager {
             Self.headerBegin,
             "model = \(tomlString(model))",
             "model_provider = \(tomlString(Self.providerId))",
+            // 已登录 ChatGPT 时必须强制走 API/自定义 provider，否则只改显示名、流量仍打账号 websocket。
+            "forced_login_method = \"api\"",
+            // 顶层键，改内置 openai 的 base_url。不能写 [model_providers.openai]（保留 ID，ChatGPT 会拒读配置）。
+            "openai_base_url = \(tomlString(baseURL))",
             Self.headerEnd,
         ]
         if !baseTopLevel.isEmpty {
@@ -238,11 +328,12 @@ final class CodexConfigManager {
         }
         tail.append("")
         tail.append(Self.providerBegin)
-        tail.append("[model_providers.\(Self.providerId)]")
-        tail.append("name = \(tomlString("AIUsage Proxy"))")
-        tail.append("base_url = \(tomlString(baseURL))")
-        tail.append("wire_api = \(tomlString("responses"))")
-        tail.append("experimental_bearer_token = \(tomlString(bearerToken))")
+        tail.append(contentsOf: managedProviderTable(
+            id: Self.providerId,
+            displayName: "AIUsage Proxy",
+            baseURL: baseURL,
+            bearerToken: bearerToken
+        ))
         tail.append(Self.providerEnd)
         tail.append("")
         let tailText = tail.joined(separator: "\n")
@@ -471,7 +562,201 @@ final class CodexConfigManager {
         return nil
     }
 
+    // MARK: - ChatGPT Auth Stash
+    // 账号身份（ChatGPT tokens / 用户自己的 API key）与节点身份（本地代理 client key）必须完全分开：
+    // 激活时 live auth.json 只允许 apikey + OPENAI_API_KEY=<代理 client key>，其它登录只存在 .aiusage.bak。
+    // 同时把 OPENAI_BASE_URL / OPENAI_API_KEY 写入 ~/.codex/.env：ChatGPT 桌面端内置客户端会忽略
+    // 自定义 model_provider，空桩就会打到 api.openai.com 且不带 Bearer。
+
+    /// 暂存非代理身份（若有），并写入只含代理密钥的 live auth.json。
+    private func installProxyAuthIdentity(proxyAPIKey: String) throws {
+        if fileManager.fileExists(atPath: authPath) {
+            let current: Data
+            do {
+                current = try Data(contentsOf: URL(fileURLWithPath: authPath))
+            } catch {
+                codexConfigLog.error("Failed to read Codex auth.json: \(String(describing: error), privacy: .public)")
+                throw CodexConfigError.unreadableManagedFile("auth.json")
+            }
+            if isProxyAuthIdentity(current, proxyAPIKey: proxyAPIKey) {
+                return
+            }
+            if shouldStashCurrentAuth(current, proxyAPIKey: proxyAPIKey) {
+                let updatingExistingBackup = fileManager.fileExists(atPath: authBackupPath)
+                do {
+                    try current.write(to: URL(fileURLWithPath: authBackupPath), options: .atomic)
+                    applyRestrictivePermissions(at: authBackupPath)
+                    if updatingExistingBackup {
+                        codexConfigLog.info("Updated stashed auth.json after account identity changed")
+                    } else {
+                        codexConfigLog.info("Non-proxy auth.json stashed; live identity is proxy-only")
+                    }
+                } catch {
+                    codexConfigLog.error("Failed to stash Codex auth.json: \(String(describing: error), privacy: .public)")
+                    throw CodexConfigError.failedToWriteFile
+                }
+            }
+        }
+        try writeAPIKeyAuthStub(proxyAPIKey: proxyAPIKey)
+    }
+
+    /// 监视 ~/.codex：若 ChatGPT 桌面端把登录写回来，立刻再换成代理身份。
+    private func stashChatGPTAuthIfNeeded() throws {
+        guard let key = lastProxyAPIKey, !key.isEmpty else { return }
+        try installProxyAuthIdentity(proxyAPIKey: key)
+    }
+
+    /// 把暂存的账号 auth.json 搬回；没有备份则只在本进程确实写过代理桩时清掉它。
+    private func restoreChatGPTAuthFiles(wroteProxyIdentity: Bool) throws {
+        if fileManager.fileExists(atPath: authBackupPath) {
+            do {
+                let data = try Data(contentsOf: URL(fileURLWithPath: authBackupPath))
+                try data.write(to: URL(fileURLWithPath: authPath), options: .atomic)
+                applyRestrictivePermissions(at: authPath)
+                codexConfigLog.info("Account auth.json restored from stash")
+            } catch {
+                codexConfigLog.error("Failed to restore Codex auth.json: \(String(describing: error), privacy: .public)")
+                throw CodexConfigError.failedToRestore
+            }
+            return
+        }
+        if wroteProxyIdentity, try liveAuthIsProxyStub() {
+            try removeFileIfExists(at: authPath)
+            codexConfigLog.info("Proxy auth.json stub removed (no account stash)")
+        }
+    }
+
+    private func startAuthWatch() {
+        stopAuthWatch()
+        let directory = (authPath as NSString).deletingLastPathComponent
+        let descriptor = open(directory, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            guard let self, !self.isRestoringChatGPTAuth else { return }
+            do {
+                try self.stashChatGPTAuthIfNeeded()
+            } catch {
+                codexConfigLog.error("Failed to preserve Codex proxy auth identity: \(String(describing: error), privacy: .public)")
+            }
+        }
+        source.setCancelHandler {
+            close(descriptor)
+        }
+        authDirWatch = source
+        source.resume()
+    }
+
+    private func stopAuthWatch() {
+        authDirWatch?.cancel()
+        authDirWatch = nil
+    }
+
+    private func writeAPIKeyAuthStub(proxyAPIKey: String) throws {
+        let stub: [String: Any] = [
+            "auth_mode": "apikey",
+            "OPENAI_API_KEY": proxyAPIKey,
+        ]
+        let dir = (authPath as NSString).deletingLastPathComponent
+        do {
+            try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: stub, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: URL(fileURLWithPath: authPath), options: .atomic)
+            applyRestrictivePermissions(at: authPath)
+        } catch {
+            codexConfigLog.error("Failed to write Codex auth.json stub: \(String(describing: error), privacy: .public)")
+            throw CodexConfigError.failedToWriteFile
+        }
+    }
+
+    private func shouldStashCurrentAuth(_ data: Data, proxyAPIKey: String) -> Bool {
+        if isProxyAuthIdentity(data, proxyAPIKey: proxyAPIKey) { return false }
+        if isLeftoverAPIKeyStub(data) { return false }
+        return true
+    }
+
+    private func isProxyAuthIdentity(_ data: Data, proxyAPIKey: String) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if authLooksLikeChatGPTLogin(data) { return false }
+        let mode = (object["auth_mode"] as? String)?.lowercased()
+        let key = object["OPENAI_API_KEY"] as? String
+        return mode == "apikey" && key == proxyAPIKey
+    }
+
+    /// 旧版激活留下的空 apikey 桩，不是账号身份，不要当成备份。
+    private func isLeftoverAPIKeyStub(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if authLooksLikeChatGPTLogin(data) { return false }
+        let mode = (object["auth_mode"] as? String)?.lowercased()
+        guard mode == "apikey" else { return false }
+        let key = (object["OPENAI_API_KEY"] as? String) ?? ""
+        return key.isEmpty
+    }
+
+    private func liveAuthIsProxyStub() throws -> Bool {
+        guard fileManager.fileExists(atPath: authPath) else { return false }
+        let data: Data
+        do {
+            data = try Data(contentsOf: URL(fileURLWithPath: authPath))
+        } catch {
+            codexConfigLog.error("Failed to inspect Codex auth.json: \(String(describing: error), privacy: .public)")
+            throw CodexConfigError.unreadableManagedFile("auth.json")
+        }
+        if authLooksLikeChatGPTLogin(data) { return false }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return (object["auth_mode"] as? String)?.lowercased() == "apikey"
+    }
+
+    private func authLooksLikeChatGPTLogin(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if (object["auth_mode"] as? String)?.lowercased() == "chatgpt" {
+            return true
+        }
+        guard let tokens = object["tokens"] as? [String: Any] else { return false }
+        let refresh = tokens["refresh_token"] as? String
+        let access = tokens["access_token"] as? String
+        return !(refresh ?? "").isEmpty || !(access ?? "").isEmpty
+    }
+
     // MARK: - Helpers
+
+    /// HEADER 块托管的顶层键：注入时从用户正文剥离，避免与受管理块重复。
+    private func isManagedHeaderKey(_ trimmed: String) -> Bool {
+        isTopLevelKey(trimmed, key: "model")
+            || isTopLevelKey(trimmed, key: "model_provider")
+            || isTopLevelKey(trimmed, key: "forced_login_method")
+            || isTopLevelKey(trimmed, key: "openai_base_url")
+    }
+
+    private func managedProviderTable(
+        id: String,
+        displayName: String,
+        baseURL: String,
+        bearerToken: String
+    ) -> [String] {
+        [
+            "[model_providers.\(id)]",
+            "name = \(tomlString(displayName))",
+            "base_url = \(tomlString(baseURL))",
+            "wire_api = \(tomlString("responses"))",
+            "requires_openai_auth = false",
+            "supports_websockets = false",
+            "experimental_bearer_token = \(tomlString(bearerToken))",
+            "env_key = \(tomlString("OPENAI_API_KEY"))",
+        ]
+    }
 
     /// 判断某行是否为指定顶层 key 的赋值（精确匹配，避免误伤 model_reasoning_effort 等）。
     private func isTopLevelKey(_ trimmed: String, key: String) -> Bool {
@@ -500,9 +785,65 @@ final class CodexConfigManager {
         }
     }
 
-    private func writeBackup(_ content: String) throws {
+    private struct ManagedFileSnapshot {
+        let path: String
+        let data: Data?
+        let permissions: NSNumber?
+    }
+
+    private func snapshotManagedFiles() throws -> [ManagedFileSnapshot] {
+        try [configPath, backupPath, authPath, authBackupPath, CodexNoProxyFixer.envFilePath].map { path in
+            guard fileManager.fileExists(atPath: path) else {
+                return ManagedFileSnapshot(path: path, data: nil, permissions: nil)
+            }
+            do {
+                let data = try Data(contentsOf: URL(fileURLWithPath: path))
+                let attributes = try? fileManager.attributesOfItem(atPath: path)
+                let permissions = attributes?[.posixPermissions] as? NSNumber
+                return ManagedFileSnapshot(path: path, data: data, permissions: permissions)
+            } catch {
+                codexConfigLog.error("Failed to snapshot Codex file \(path, privacy: .private): \(String(describing: error), privacy: .public)")
+                throw CodexConfigError.unreadableManagedFile((path as NSString).lastPathComponent)
+            }
+        }
+    }
+
+    private func restoreManagedFiles(from snapshots: [ManagedFileSnapshot]) throws {
+        for snapshot in snapshots {
+            if let data = snapshot.data {
+                let directory = (snapshot.path as NSString).deletingLastPathComponent
+                try fileManager.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                try data.write(to: URL(fileURLWithPath: snapshot.path), options: .atomic)
+                if let permissions = snapshot.permissions {
+                    try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: snapshot.path)
+                }
+            } else {
+                try removeFileIfExists(at: snapshot.path)
+            }
+        }
+    }
+
+    private func readUTF8File(at path: String) throws -> String {
         do {
-            try content.data(using: .utf8)?.write(to: URL(fileURLWithPath: backupPath), options: .atomic)
+            return try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            codexConfigLog.error("Failed to read Codex file \(path, privacy: .private): \(String(describing: error), privacy: .public)")
+            throw CodexConfigError.unreadableManagedFile((path as NSString).lastPathComponent)
+        }
+    }
+
+    private func removeFileIfExists(at path: String) throws {
+        guard fileManager.fileExists(atPath: path) else { return }
+        try fileManager.removeItem(atPath: path)
+    }
+
+    private func writeBackup(_ content: String) throws {
+        guard let data = content.data(using: .utf8) else {
+            throw CodexConfigError.failedToWriteFile
+        }
+        do {
+            try data.write(to: URL(fileURLWithPath: backupPath), options: .atomic)
+            applyRestrictivePermissions(at: backupPath)
         } catch {
             codexConfigLog.error("Failed to write Codex config backup: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.failedToWriteFile
@@ -517,17 +858,20 @@ final class CodexConfigManager {
             codexConfigLog.error("Failed to create Codex config directory: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.failedToCreateDirectory
         }
+        guard let data = content.data(using: .utf8) else {
+            throw CodexConfigError.failedToWriteFile
+        }
         do {
-            try content.data(using: .utf8)?.write(to: URL(fileURLWithPath: configPath), options: .atomic)
-            applyRestrictivePermissions()
+            try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
+            applyRestrictivePermissions(at: configPath)
         } catch {
             codexConfigLog.error("Failed to write Codex config.toml: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.failedToWriteFile
         }
     }
 
-    /// config.toml 可能含 token，写入后恢复 0600 权限。
-    private func applyRestrictivePermissions() {
-        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configPath)
+    /// config.toml / auth.json 可能含 token，写入后恢复 0600 权限。
+    private func applyRestrictivePermissions(at path: String) {
+        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
     }
 }

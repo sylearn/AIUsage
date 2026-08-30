@@ -607,12 +607,25 @@ class NodeProfileStore: ObservableObject {
     /// 成功返回**目录**路径（CODEX_HOME 指向目录而非文件），失败返回 nil。
     /// config.toml 含 `experimental_bearer_token`，写入后限制为 0600。
     @discardableResult
-    static func exportCodexHome(for profile: NodeProfile, configTOML: String) -> String? {
+    static func exportCodexHome(
+        for profile: NodeProfile,
+        configTOML: String,
+        proxyBaseURL: String? = nil,
+        proxyAPIKey: String? = nil
+    ) -> String? {
         let allowedChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
-        let sanitizedName = profile.metadata.name.unicodeScalars
+        let sanitizedID = profile.id.unicodeScalars
             .map { allowedChars.contains($0) ? String($0) : "_" }
             .joined()
-        let dirName = sanitizedName.isEmpty ? profile.id : sanitizedName
+        guard !sanitizedID.isEmpty else {
+            storeLog.error("Cannot export Codex home for a profile with an empty id")
+            return nil
+        }
+        let digest = SHA256.hash(data: Data(profile.id.utf8))
+            .prefix(8)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let dirName = "\(sanitizedID.prefix(48))-\(digest)"
         let dir = (codexHomeBaseDirectory as NSString).appendingPathComponent(dirName)
         let fm = FileManager.default
         do {
@@ -631,13 +644,28 @@ class NodeProfileStore: ObservableObject {
             return nil
         }
 
-        // codex 用 CODEX_HOME 启动时读 `$CODEX_HOME/.env`，而非 `~/.codex/.env`。系统代理会拦截
-        // codex 发往本地代理（127.0.0.1:<port>）的请求并回 502，故在此独立目录一并写入 no_proxy，
-        // 让 codex(reqwest) 跳过对回环主机的代理。loopback 跳代理始终正确（codex 只与本地代理通信），
-        // 故无条件写入；写入失败不阻断（仍返回目录，外层用复制命令兜底）。
+        // 独立 CODEX_HOME 不能继承 ~/.codex/auth.json 的 ChatGPT 登录，否则自定义 base_url 仍会被忽略。
+        let isolatedAuth = (dir as NSString).appendingPathComponent("auth.json")
+        var stubObject: [String: Any] = ["auth_mode": "apikey"]
+        if let key = proxyAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            stubObject["OPENAI_API_KEY"] = key
+        }
+        if let stub = try? JSONSerialization.data(
+            withJSONObject: stubObject,
+            options: [.prettyPrinted, .sortedKeys]
+        ) {
+            try? stub.write(to: URL(fileURLWithPath: isolatedAuth), options: .atomic)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: isolatedAuth)
+        }
+
+        // 与激活态同一套节点身份：OPENAI_BASE_URL 指向本地代理 + 同一把 client key + no_proxy。
         let envPath = (dir as NSString).appendingPathComponent(".env")
         do {
-            try (CodexNoProxyFixer.exportCommand + "\n").write(toFile: envPath, atomically: true, encoding: .utf8)
+            try CodexNoProxyFixer.writeIsolatedEnv(
+                to: envPath,
+                openAIBaseURL: proxyBaseURL,
+                openAIAPIKey: proxyAPIKey
+            )
             try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envPath)
         } catch {
             storeLog.error("Failed to write CODEX_HOME .env for \(profile.metadata.name, privacy: .public): \(String(describing: error), privacy: .public)")

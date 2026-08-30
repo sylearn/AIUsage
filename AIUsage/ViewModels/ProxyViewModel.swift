@@ -49,8 +49,8 @@ enum ProxyRuntimeError: LocalizedError {
     case proxyPortInUseByNode(Int, String, String)
     case activationStatePersistFailed
     case deactivationStatePersistFailed
-    /// 该轨全局统一代理已启用时，单节点激活被接管：应改用全局代理切换激活节点。
-    case managedByGlobalProxy
+    /// Claude Code 已接入 Code 网关时，禁止再直连激活节点。
+    case managedByCodeGateway
 
     var errorDescription: String? {
         switch self {
@@ -77,7 +77,7 @@ enum ProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t("The node started, but AIUsage could not persist the activated state.", "节点已启动，但 AIUsage 无法保存激活状态。")
         case .deactivationStatePersistFailed:
             return AppSettings.shared.t("The node stopped, but AIUsage could not persist the deactivated state.", "节点已停止，但 AIUsage 无法保存停用状态。")
-        case .managedByGlobalProxy:
+        case .managedByCodeGateway:
             return AppSettings.shared.t(
                 "Claude Code is attached to Code Gateway. Switch its route from the Code card, or disconnect Code before using a direct node.",
                 "Claude Code 已接入 Code 网关。请在 Code 卡片中切换路由，或先断开 Code 再使用直连节点。"
@@ -255,6 +255,9 @@ class ProxyViewModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                if GlobalProxyManager.codex.isEnabled {
+                    await GlobalProxyManager.codex.disable()
+                }
                 guard let self, let id = self.activatedCodexConfigId else { return }
                 await self.deactivateConfiguration(id)
             }
@@ -776,10 +779,14 @@ class ProxyViewModel: ObservableObject {
 
         let isCodex = config.nodeType.isCodex
 
-        // 全局代理接管本轨时，禁止每节点激活（改由全局代理面板切换激活节点）。
-        let globalManager = isCodex ? GlobalProxyManager.codex : GlobalProxyManager.claude
-        if globalManager.isEnabled {
-            throw ProxyRuntimeError.managedByGlobalProxy
+        // Codex 全局代理开着时，节点列表的「接入」就是热切换上游，不要抛 Claude 文案、也不要再写一份直连 config.toml。
+        if isCodex, GlobalProxyManager.codex.isEnabled {
+            try await switchCodexGlobalProxyRoute(to: id)
+            return
+        }
+        // Claude Code 由 Code 网关接管时，禁止再直连写 settings.json。
+        if !isCodex, GlobalProxyManager.claude.isEnabled {
+            throw ProxyRuntimeError.managedByCodeGateway
         }
 
         if activatedId(isCodex: isCodex) == id {
@@ -904,6 +911,24 @@ class ProxyViewModel: ObservableObject {
             saveActivatedCodexId()
         } else {
             saveActivatedId()
+        }
+    }
+
+    /// 全局代理运行中：把 Codex 流量切到指定节点（不改端口、不重写 CLI 入口）。
+    func switchCodexGlobalProxyRoute(to id: String) async throws {
+        let gateway = GlobalProxyManager.codex
+        if gateway.activeNodeId == id, gateway.isEnabled { return }
+        let switched = await gateway.switchActiveNode(to: id)
+        if let failure = gateway.operationError {
+            throw ProxyRuntimeError.proxyStartFailed(failure)
+        }
+        guard switched, gateway.activeNodeId == id, gateway.isEnabled else {
+            throw ProxyRuntimeError.proxyStartFailed(
+                AppSettings.shared.t(
+                    "The Codex Gateway is busy. Try switching the node again.",
+                    "Codex Gateway 正忙，请重新切换节点。"
+                )
+            )
         }
     }
 

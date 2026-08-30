@@ -3,9 +3,10 @@ import AppKit
 import os.log
 
 // MARK: - Proxy-Only Mode
-// Allows starting a proxy process without writing to ~/.claude/settings.json.
+// Allows starting a proxy process without writing CLI config
+// (~/.claude/settings.json or ~/.codex/config.toml).
 // Multiple nodes can run in proxy-only mode simultaneously, each on its own port.
-// Useful for letting other tools connect to the proxy without affecting Claude Code config.
+// Useful for letting other tools connect to the proxy without switching the local CLI.
 
 extension ProxyViewModel {
 
@@ -311,7 +312,12 @@ extension ProxyViewModel {
             nodeTOML: nodeTOML
         )
 
-        guard let dir = NodeProfileStore.exportCodexHome(for: profile, configTOML: toml) else {
+        guard let dir = NodeProfileStore.exportCodexHome(
+            for: profile,
+            configTOML: toml,
+            proxyBaseURL: baseURL,
+            proxyAPIKey: config.effectiveClientKey
+        ) else {
             return nil
         }
         return "CODEX_HOME=\"\(dir)\" codex"

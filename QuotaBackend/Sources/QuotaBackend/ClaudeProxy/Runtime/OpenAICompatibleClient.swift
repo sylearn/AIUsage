@@ -1172,7 +1172,13 @@ public actor OpenAICompatibleClient {
                 try await flushFrame()
                 currentEvent = String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces)
             } else if line.hasPrefix("data:") {
-                dataLines.append(String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces))
+                let data = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
+                if data == "[DONE]" {
+                    try await flushFrame()
+                    try await onFrame(nil, data)
+                } else {
+                    dataLines.append(data)
+                }
             }
             // 其它行（注释/心跳 ':' 等）忽略。
         }

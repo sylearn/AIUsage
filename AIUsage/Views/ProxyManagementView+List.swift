@@ -26,13 +26,13 @@ extension ProxyManagementView {
                     let isSelected = selectedConfigId == config.id
                     let isDragging = draggingConfigId == config.id
                     let claudeUsage = claudeNodeUsage(for: config.id)
+                    let codexUsage = codexNodeUsage(for: config.id)
                     let canAttachCodeToGateway = shouldAttachCodeToGateway(nodeID: config.id)
                     let deletionBlockReason = viewModel.managedRuntimeDeletionBlockReason(for: config.id)
                     VStack(spacing: 0) {
                         ConfigurationCardView(
                             config: config,
-                            isActive: (showsClaudeProductConfiguration || family.isCodex)
-                                && viewModel.isNodeActivated(config.id),
+                            isActive: nodeIsRoutedToClient(config),
                             isProxyOnlyRunning: showsClaudeProductConfiguration
                                 ? viewModel.proxyOnlyRunningIds.contains(config.id)
                                 : viewModel.isNodeRuntimeRunning(config.id),
@@ -43,6 +43,7 @@ extension ProxyManagementView {
                             isActivationManaged: !family.isCodex && claudeGateway.isEnabled,
                             canAttachCodeToGateway: canAttachCodeToGateway,
                             claudeUsage: claudeUsage,
+                            codexUsage: codexUsage,
                             deletionBlockReason: deletionBlockReason,
                             isSelected: isSelected,
                             statsRequests: stats.totalRequests,
@@ -133,6 +134,17 @@ extension ProxyManagementView {
         )
     }
 
+    private func nodeIsRoutedToClient(_ config: ProxyConfiguration) -> Bool {
+        if family.isCodex {
+            if codexGateway.isEnabled {
+                return codexGateway.activeNodeId == config.id
+            }
+            return viewModel.isNodeActivated(config.id)
+        }
+        guard showsClaudeProductConfiguration else { return false }
+        return viewModel.isNodeActivated(config.id)
+    }
+
     private func claudeNodeUsage(for nodeID: String) -> ClaudeNodeUsage {
         guard !family.isCodex else { return .none }
         let directCode = viewModel.isNodeActivated(nodeID)
@@ -152,6 +164,19 @@ extension ProxyManagementView {
         )
     }
 
+    private func codexNodeUsage(for nodeID: String) -> CodexNodeUsage {
+        guard family.isCodex else { return .none }
+        if codexGateway.isEnabled, codexGateway.activeNodeId == nodeID {
+            return CodexNodeUsage(route: .gateway, running: codexGatewayRuntime.isRunning)
+        }
+        if viewModel.isNodeActivated(nodeID) {
+            let node = viewModel.configurations.first { $0.id == nodeID }
+            let running = node?.needsProxyProcess != true || viewModel.isProxyRunning(nodeID)
+            return CodexNodeUsage(route: .direct, running: running)
+        }
+        return .none
+    }
+
     private func isManagedRuntimeBusy(nodeID: String) -> Bool {
         if codexGateway.activeNodeId == nodeID, codexGateway.isBusy { return true }
         if claudeGateway.activeNodeId == nodeID, claudeGateway.isBusy { return true }
@@ -166,11 +191,31 @@ extension ProxyManagementView {
     }
 
     private func toggleCodeRoute(for config: ProxyConfiguration) {
+        if family.isCodex {
+            Task { await toggleCodexRoute(config) }
+            return
+        }
         if shouldAttachCodeToGateway(nodeID: config.id) {
             Task { await claudeGateway.enable(activeNodeId: config.id) }
         } else {
             Task { await viewModel.toggleActivation(config.id) }
         }
+    }
+
+    /// 全局代理开着时，节点开关热切换上游；关掉当前节点则停用全局代理。未开全局代理时走每节点接入。
+    private func toggleCodexRoute(_ config: ProxyConfiguration) async {
+        if codexGateway.isEnabled {
+            if codexGateway.activeNodeId == config.id {
+                await codexGateway.disable()
+            } else {
+                await viewModel.activateConfiguration(config.id)
+            }
+            if let failure = codexGateway.operationError {
+                viewModel.operationErrorMessage = failure
+            }
+            return
+        }
+        await viewModel.toggleActivation(config.id)
     }
 
     // MARK: - Model Quick Switch

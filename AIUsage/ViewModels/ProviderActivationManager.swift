@@ -142,23 +142,6 @@ final class ProviderActivationManager: ObservableObject {
     // MARK: Codex activation
 
     func activateCodexAccount(entry: ProviderAccountEntry) throws {
-        // 互斥（全局统一代理优先）：全局代理启用时常驻进程接管 ~/.codex/config.toml（指向固定端口），
-        // 此时写 auth.json 不会生效（CLI 仍走全局代理）。直接拦截，杜绝「点了像激活、实则无效」的误导。
-        // 读持久化文件而非 @MainActor 的 GlobalProxyManager：本方法非 actor 隔离，且每次切换都已同步落盘。
-        if GlobalProxyStore.load(track: .codex).isEnabled {
-            let msg = settings.t(
-                "The Codex global proxy is enabled. Switch the active node from the global proxy panel, or turn it off to activate accounts individually.",
-                "Codex 全局代理已启用。请在全局代理面板切换激活节点，或先关闭全局代理再单独激活账号。"
-            )
-            codexActivationResult = .failure(msg)
-            activationResult = .failure(msg)
-            throw ProviderError("codex_global_proxy_active", msg)
-        }
-
-        // 互斥：激活订阅账号前，先让正在运行的 Codex 代理停用并还原 config.toml，
-        // 否则 config.toml 里的 model_provider=aiusage-proxy 会让 CLI 忽略新写入的 auth.json。
-        NotificationCenter.default.post(name: .codexSubscriptionAccountActivating, object: nil)
-
         let fm = FileManager.default
         let codexDir = NSString(string: "~/.codex").expandingTildeInPath
         let targetPath = "\(codexDir)/auth.json"
@@ -180,6 +163,10 @@ final class ProviderActivationManager: ObservableObject {
         let sourceData = try Data(contentsOf: URL(fileURLWithPath: resolved))
         let nativeData = try convertToCodexNativeFormat(sourceData)
 
+        // 目标账号验证完成后再解除代理接管，避免坏文件让当前可用路由先被停掉。
+        // 停进程走通知（异步），但文件必须在写账号之前同步归位，否则异步 restore 会覆盖新账号。
+        NotificationCenter.default.post(name: .codexSubscriptionAccountActivating, object: nil)
+        try CodexConfigManager.shared.restore()
         try writeAuthFileWithBackup(targetDir: codexDir, targetPath: targetPath, data: nativeData, fm: fm)
 
         let entryPath = entry.storedAccount?.sourceFilePath ?? entry.liveProvider?.sourceFilePath

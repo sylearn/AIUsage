@@ -132,6 +132,7 @@ public struct ScienceModelProtocolAdapter: Sendable {
                 upstreamModel: upstream,
                 displayName: displayName,
                 supports1M: supports1MUpstreamModels.contains(upstream)
+                    || supports1MUpstreamModels.contains(id)
             )
         }
         self.models = builtModels

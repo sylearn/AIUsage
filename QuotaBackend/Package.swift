@@ -29,9 +29,11 @@ let package = Package(
                 "QuotaHTTPServer+ClaudeProxy.swift",
                 "QuotaHTTPServer+Admin.swift",
                 "QuotaHTTPServer+CodexProxy.swift",
+                "QuotaHTTPServer+CodexWebSocket.swift",
                 "QuotaHTTPServer+OpenCodeProxy.swift",
                 "QuotaHTTPServer+Passthrough.swift",
                 "QuotaHTTPServer+TLS.swift",
+                "QuotaWebSocket.swift",
                 "ParentWatchdog.swift",
             ],
             sources: ["main.swift"]

@@ -116,33 +116,48 @@ struct ProxyPricingRulesEditor: View {
         _lastCurrency = State(initialValue: currency.wrappedValue)
     }
 
+    /// 列宽必须能在 Claude 编辑器最小内容区里放下（窗口 760 − 侧栏 148 − 内边距）。
+    /// 模型列吃剩余宽度并中间截断；价格/来源固定，禁止把「来源」顶出卡片。
+    private enum Metrics {
+        static let rowSpacing: CGFloat = 6
+        static let rowPadding: CGFloat = 10
+        static let priceWidth: CGFloat = 70
+        static let sourceWidth: CGFloat = 64
+        static let menuWidth: CGFloat = 22
+        static var priceClusterWidth: CGFloat { priceWidth * 4 + rowSpacing * 3 }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             toolbar
-            columnHeader
 
-            if filteredDraftIDs.isEmpty {
-                emptyState
-            } else {
-                LazyVStack(spacing: 0) {
-                    ForEach($drafts) { $draft in
-                        if filteredDraftIDs.contains(draft.id) {
-                            pricingRow($draft)
-                            if draft.id != filteredDraftIDs.last {
-                                Divider().opacity(0.45)
+            VStack(spacing: 0) {
+                columnHeader
+                if filteredDraftIDs.isEmpty {
+                    emptyState
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach($drafts) { $draft in
+                            if filteredDraftIDs.contains(draft.id) {
+                                pricingRow($draft)
+                                if draft.id != filteredDraftIDs.last {
+                                    Divider().opacity(0.45)
+                                }
                             }
                         }
                     }
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.primary.opacity(0.025))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                )
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(0.025))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             Text(L(
                 "Per million tokens. A blank price means “not estimated”; zero is reserved for models explicitly marked free.",
@@ -150,7 +165,9 @@ struct ProxyPricingRulesEditor: View {
             ))
             .font(.caption2)
             .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: draftsFingerprint) { _, _ in
             persistDrafts()
         }
@@ -206,7 +223,7 @@ struct ProxyPricingRulesEditor: View {
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 10)
-                .frame(width: 260, height: 32)
+                .frame(minWidth: 140, idealWidth: 260, maxWidth: 260, minHeight: 32)
                 .background(
                     RoundedRectangle(cornerRadius: 9)
                         .fill(Color(nsColor: .textBackgroundColor).opacity(0.72))
@@ -223,7 +240,7 @@ struct ProxyPricingRulesEditor: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 220)
+                .frame(minWidth: 168, maxWidth: 220)
 
                 Spacer()
             }
@@ -231,22 +248,27 @@ struct ProxyPricingRulesEditor: View {
     }
 
     private var columnHeader: some View {
-        HStack(spacing: 8) {
-            Text(L("Model", "模型")).frame(width: 206, alignment: .leading)
+        HStack(spacing: Metrics.rowSpacing) {
+            Text(L("Model", "模型"))
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             priceHeader(L("Input", "输入"))
             priceHeader(L("Output", "输出"))
-            priceHeader(L("Cache Write", "缓存写"))
-            priceHeader(L("Cache Read", "缓存读"))
-            Text(L("Source", "来源")).frame(width: 82, alignment: .leading)
-            Color.clear.frame(width: 26)
+            priceHeader(L("Cache W", "缓存写"))
+            priceHeader(L("Cache R", "缓存读"))
+            Text(L("Source", "来源"))
+                .frame(width: Metrics.sourceWidth, alignment: .leading)
+            Color.clear.frame(width: Metrics.menuWidth)
         }
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Metrics.rowPadding)
+        .padding(.vertical, 8)
     }
 
     private func priceHeader(_ title: String) -> some View {
-        Text(title).frame(width: 92, alignment: .leading)
+        Text(title)
+            .lineLimit(1)
+            .frame(width: Metrics.priceWidth, alignment: .leading)
     }
 
     private var emptyState: some View {
@@ -266,18 +288,10 @@ struct ProxyPricingRulesEditor: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 34)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.025))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.primary.opacity(0.08), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
-                )
-        )
     }
 
     private func pricingRow(_ draft: Binding<RuleDraft>) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.rowSpacing) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(draft.wrappedValue.id)
                     .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
@@ -288,22 +302,25 @@ struct ProxyPricingRulesEditor: View {
                     Text(L("Explicitly free", "明确免费"))
                         .font(.system(size: 9.5, weight: .semibold))
                         .foregroundStyle(.green)
+                        .lineLimit(1)
                 } else if !draft.wrappedValue.hasEnteredRate {
                     Text(L("No estimate", "未估算"))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
-            .frame(width: 206, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             if draft.wrappedValue.isFree {
                 HStack {
                     Text("0")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.green)
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
-                .frame(width: 392)
+                .frame(width: Metrics.priceClusterWidth)
             } else {
                 compactPriceField(draft.input, draft: draft)
                 compactPriceField(draft.output, draft: draft)
@@ -337,7 +354,7 @@ struct ProxyPricingRulesEditor: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 26, height: 28)
+                    .frame(width: Metrics.menuWidth, height: 28)
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
@@ -345,8 +362,8 @@ struct ProxyPricingRulesEditor: View {
             .fixedSize()
             .help(L("Price actions", "价格操作"))
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 48)
+        .padding(.horizontal, Metrics.rowPadding)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .contentShape(Rectangle())
     }
 
@@ -363,8 +380,9 @@ struct ProxyPricingRulesEditor: View {
                 .font(.system(size: 11, design: .monospaced))
                 .multilineTextAlignment(.leading)
         }
-        .padding(.horizontal, 7)
-        .frame(width: 92, height: 28)
+        .padding(.horizontal, 6)
+        .frame(width: Metrics.priceWidth, height: 28)
+        .clipped()
         .background(
             RoundedRectangle(cornerRadius: 7)
                 .fill(Color(nsColor: .textBackgroundColor).opacity(0.66))
@@ -373,31 +391,32 @@ struct ProxyPricingRulesEditor: View {
             RoundedRectangle(cornerRadius: 7)
                 .stroke(Color.primary.opacity(0.075), lineWidth: 1)
         )
+        .layoutPriority(0)
     }
 
-    @ViewBuilder
     private func sourceLabel(_ draft: RuleDraft) -> some View {
-        if draft.isFree {
-            Text(L("Manual", "手动"))
-                .foregroundStyle(.green)
-                .frame(width: 82, alignment: .leading)
-        } else if let source = draft.source {
-            Label(
-                source.kind == .modelsDev ? "models.dev" : L("Manual", "手动"),
-                systemImage: source.kind == .modelsDev ? "globe" : "pencil"
-            )
-            .foregroundStyle(source.kind == .modelsDev ? Color.teal : Color.secondary)
-            .frame(width: 82, alignment: .leading)
-            .help(source.label)
-        } else if draft.hasEnteredRate {
-            Label(L("Manual", "手动"), systemImage: "pencil")
-                .foregroundStyle(.secondary)
-                .frame(width: 82, alignment: .leading)
-        } else {
-            Text("—")
-                .foregroundStyle(.tertiary)
-                .frame(width: 82, alignment: .leading)
+        HStack(spacing: 3) {
+            if draft.isFree {
+                Text(L("Manual", "手动"))
+                    .foregroundStyle(.green)
+            } else if let source = draft.source {
+                Image(systemName: source.kind == .modelsDev ? "globe" : "pencil")
+                Text(source.kind == .modelsDev ? L("Public", "公开") : L("Manual", "手动"))
+                    .foregroundStyle(source.kind == .modelsDev ? Color.teal : Color.secondary)
+            } else if draft.hasEnteredRate {
+                Image(systemName: "pencil")
+                Text(L("Manual", "手动"))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("—")
+                    .foregroundStyle(.tertiary)
+            }
         }
+        .font(.system(size: 9.5, weight: .medium))
+        .lineLimit(1)
+        .frame(width: Metrics.sourceWidth, alignment: .leading)
+        .clipped()
+        .help(draft.source?.label ?? "")
     }
 
     private func numericTextBinding(
@@ -638,7 +657,7 @@ struct ProviderModelLibraryEditor: View {
 
     private var columnHeaders: some View {
         HStack(spacing: 6) {
-            Text(L("Model", "模型")).frame(maxWidth: .infinity, alignment: .leading)
+            Text(L("Model", "模型")).frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             Group {
                 Text(L("Input", "输入"))
                 Text(L("Output", "输出"))
@@ -658,7 +677,8 @@ struct ProviderModelLibraryEditor: View {
             TextField("gpt-5.5", text: row.model.name)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12, design: .monospaced))
-                .frame(maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .layoutPriority(1)
                 .autocorrectionDisabled()
             providerPriceField(row.model.pricing.inputPerMillion, pricing: row.model.pricing)
             providerPriceField(row.model.pricing.outputPerMillion, pricing: row.model.pricing)
@@ -696,6 +716,7 @@ struct ProviderModelLibraryEditor: View {
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11, design: .monospaced))
             .frame(width: 64)
+            .clipped()
     }
 
     private func appendModels(_ names: [String]) {

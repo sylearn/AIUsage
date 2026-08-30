@@ -20,6 +20,19 @@ struct ClaudeNodeUsage: Equatable {
     var isEmpty: Bool { codeRoute == nil && !desktop && !science }
 }
 
+enum CodexNodeRoute: Equatable {
+    case direct
+    case gateway
+}
+
+struct CodexNodeUsage: Equatable {
+    var route: CodexNodeRoute?
+    var running = false
+
+    static let none = CodexNodeUsage()
+    var isEmpty: Bool { route == nil }
+}
+
 /// Standalone Equatable View so SwiftUI can skip re-rendering cards whose inputs haven't changed.
 /// When `selectedConfigId` changes, only the previously-selected and newly-selected cards re-render;
 /// the rest are skipped entirely. Same optimization applies during drag-and-drop state changes.
@@ -34,6 +47,7 @@ struct ConfigurationCardView: View, Equatable {
     let isActivationManaged: Bool
     let canAttachCodeToGateway: Bool
     let claudeUsage: ClaudeNodeUsage
+    let codexUsage: CodexNodeUsage
     let deletionBlockReason: String?
     let isSelected: Bool
     let statsRequests: Int
@@ -68,6 +82,7 @@ struct ConfigurationCardView: View, Equatable {
         lhs.isActivationManaged == rhs.isActivationManaged &&
         lhs.canAttachCodeToGateway == rhs.canAttachCodeToGateway &&
         lhs.claudeUsage == rhs.claudeUsage &&
+        lhs.codexUsage == rhs.codexUsage &&
         lhs.deletionBlockReason == rhs.deletionBlockReason &&
         lhs.isSelected == rhs.isSelected &&
         lhs.statsRequests == rhs.statsRequests &&
@@ -123,6 +138,13 @@ struct ConfigurationCardView: View, Equatable {
     }
 
     private var nodeSwitchHelp: String {
+        if config.nodeType.isCodex {
+            return isProxyOnlyRunning
+                ? L("Stop this node's local proxy. Codex will not switch until you connect it.",
+                    "关闭此节点的本地代理。这不会改变 Codex 是否已接入。")
+                : L("Start this node's local proxy without switching Codex. Use the connect switch to route Codex here.",
+                    "仅启动此节点的本地代理，不会把 Codex 切过来。要把 Codex 接到此节点，请使用接入开关。")
+        }
         if runtimeStopIsProductOwned {
             return L(
                 "This node is currently used by \(productRuntimeOwners.joined(separator: " · "))",
@@ -132,6 +154,13 @@ struct ConfigurationCardView: View, Equatable {
         return isProxyOnlyRunning
             ? L("Turn off this node", "关闭节点")
             : L("Turn on this node for Code, Desktop and Science", "开启节点，供 Code、Desktop 与 Science 使用")
+    }
+
+    private var managedActivationHelp: String {
+        config.nodeType.isCodex
+            ? L("Codex is attached to the global proxy. Switch the node here or from the global proxy card.",
+                "Codex 正由全局代理管理。请在节点列表或全局代理卡片中切换节点。")
+            : L("Claude Code is managed by Code Gateway", "Claude Code 正由 Code 网关管理")
     }
 
     private var launchCommandLabel: String {
@@ -164,7 +193,7 @@ struct ConfigurationCardView: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 nodeTypeBadge
-                if !claudeUsage.isEmpty {
+                if !claudeUsage.isEmpty || !codexUsage.isEmpty {
                     consumerBadges
                 }
                 Spacer(minLength: 0)
@@ -209,21 +238,39 @@ struct ConfigurationCardView: View, Equatable {
 
                 HStack(spacing: 6) {
                     if showsActivationControl {
-                        Toggle("", isOn: Binding(
-                            get: { isActive },
-                            set: { newValue in if newValue != isActive { onToggleActivation() } }
-                        ))
-                        .toggleStyle(ProxyActivationToggleStyle(
-                            brandColor: brandColor,
-                            isBusy: isBusy
-                        ))
-                        .disabled(isBusy || isActivationManaged)
-                        .instantTooltip(isActivationManaged
-                            ? L("Claude Code is managed by Code Gateway", "Claude Code 正由 Code 网关管理")
-                            : (isActive ? disconnectLabel : applyLabel))
+                        if config.nodeType.isCodex {
+                            HStack(spacing: 5) {
+                                Text(isActive ? L("On", "已接入") : L("Off", "未接入"))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(isActive ? Color.green : Color.secondary)
+                                Toggle("", isOn: Binding(
+                                    get: { isActive },
+                                    set: { newValue in if newValue != isActive { onToggleActivation() } }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .tint(brandColor)
+                            }
+                            .disabled(isBusy || isActivationManaged)
+                            .instantTooltip(isActivationManaged ? managedActivationHelp : (isActive ? disconnectLabel : applyLabel))
+                        } else {
+                            Toggle("", isOn: Binding(
+                                get: { isActive },
+                                set: { newValue in if newValue != isActive { onToggleActivation() } }
+                            ))
+                            .toggleStyle(ProxyActivationToggleStyle(
+                                brandColor: brandColor,
+                                isBusy: isBusy
+                            ))
+                            .disabled(isBusy || isActivationManaged)
+                            .instantTooltip(isActivationManaged
+                                ? managedActivationHelp
+                                : (isActive ? disconnectLabel : applyLabel))
+                        }
                     }
 
-                    if config.needsProxyProcess {
+                    if config.needsProxyProcess, !config.nodeType.isCodex {
                         HStack(spacing: 5) {
                             Text(isProxyOnlyRunning ? L("On", "已开启") : L("Off", "未开启"))
                                 .font(.system(size: 10, weight: .semibold))
@@ -486,7 +533,13 @@ struct ConfigurationCardView: View, Equatable {
                 Label(
                     isActive
                         ? connectedUnavailableLabel
-                        : isProxyOnlyRunning ? L("Turn Off Node", "关闭节点") : L("Turn On Node", "开启节点"),
+                        : isProxyOnlyRunning
+                            ? (config.nodeType.isCodex
+                               ? L("Stop Local Proxy Only", "仅关闭本地代理")
+                               : L("Turn Off Node", "关闭节点"))
+                            : (config.nodeType.isCodex
+                               ? L("Start Local Proxy Only", "仅启动本地代理")
+                               : L("Turn On Node", "开启节点")),
                     systemImage: isProxyOnlyRunning ? "power.circle.fill" : "power.circle"
                 )
             }
@@ -566,6 +619,17 @@ struct ConfigurationCardView: View, Equatable {
 
     private var consumerBadges: some View {
         HStack(spacing: 4) {
+            if let route = codexUsage.route {
+                consumerBadge(
+                    title: "Codex",
+                    icon: route == .gateway ? "point.3.connected.trianglepath.dotted" : "terminal",
+                    color: Self.codexBrand,
+                    isRunning: codexUsage.running,
+                    help: route == .gateway
+                        ? L("Codex uses this node through the global proxy", "Codex 正通过全局代理使用此节点")
+                        : L("Codex is connected directly to this node", "Codex 正直连接入此节点")
+                )
+            }
             if let route = claudeUsage.codeRoute {
                 consumerBadge(
                     title: "Code",

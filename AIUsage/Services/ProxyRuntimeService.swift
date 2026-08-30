@@ -311,32 +311,13 @@ final class ProxyRuntimeService {
             )
         } catch {
             stopProxy(config)
-            do {
-                try codexConfigManager.restore()
-            } catch {
-                proxyRuntimeLog.error("Failed to restore config.toml while rolling back Codex node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
-            }
             throw error
-        }
-
-        // 系统代理会拦截 codex 发往本地回环的请求并回 502。检测到系统代理时，自动往
-        // ~/.codex/.env 写入 no_proxy（仅对 codex 生效），让 codex 跳过本地代理。
-        // 写入失败不阻断激活（UI 横幅仍提供手动复制兜底）。
-        if SystemProxyDetector.current().isAnyEnabled {
-            do {
-                try CodexNoProxyFixer.apply()
-            } catch {
-                proxyRuntimeLog.error("Failed to write no_proxy to ~/.codex/.env for node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
-            }
         }
     }
 
     /// 停用 Codex 节点：停止进程并从备份还原 config.toml。
     func deactivateCodexRuntime(for config: ProxyConfiguration) async throws {
         stopProxy(config)
-
-        // 移除激活时写入的 no_proxy 受管理块（仅清理我们自己的块，不动用户内容）。
-        try? CodexNoProxyFixer.remove()
 
         do {
             try codexConfigManager.restore()
@@ -352,7 +333,6 @@ final class ProxyRuntimeService {
 
     /// 还原 Codex config.toml（启动时清理残留激活态用）。
     func clearCodexRuntime() throws {
-        try? CodexNoProxyFixer.remove()
         try codexConfigManager.restore()
     }
 
@@ -497,7 +477,14 @@ final class ProxyRuntimeService {
             environment["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = config.defaultModel
             environment["AIUSAGE_CLAUDE_MODEL_CATALOG"] = "1"
             environment["AIUSAGE_CLAUDE_EXACT_MODELS"] = "1"
+            environment["AIUSAGE_CLAUDE_ROUTE_STYLE"] = "code"
             environment["AIUSAGE_CLAUDE_DESKTOP_TIER_ROUTES"] = "0"
+            let exposed1M = config.runtimeModelCatalog.filter { config.supports1MModels.contains($0) }
+            if !exposed1M.isEmpty,
+               let data = try? JSONEncoder().encode(exposed1M),
+               let json = String(data: data, encoding: .utf8) {
+                environment["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json
+            }
         }
 
         if config.enableHTTPS {

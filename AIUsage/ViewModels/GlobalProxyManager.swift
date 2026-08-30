@@ -366,9 +366,16 @@ final class GlobalProxyManager: ObservableObject {
     ) async -> Bool {
         let claudeTracks = [GlobalProxyManager.claude, GlobalProxyManager.desktop]
         guard claudeTracks.allSatisfy({ !$0.isBusy }) else { return false }
+        let normalizedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedModelID.isEmpty,
+              let node = ProxyViewModel.shared.configurations.first(where: { $0.id == nodeID }) else {
+            return false
+        }
+        let previousEnabled = node.modelCatalog.supports1MModels.contains(normalizedModelID)
+        let shouldRestartNodeRuntime = nodeRuntimeRequiresRestart(nodeID: nodeID)
         guard ProxyViewModel.shared.setSupports1M(
             nodeID: nodeID,
-            modelID: modelID,
+            modelID: normalizedModelID,
             enabled: enabled
         ) else { return false }
 
@@ -382,21 +389,79 @@ final class GlobalProxyManager: ObservableObject {
             if let error = manager.operationError { failure = error }
         }
 
+        if failure == nil, shouldRestartNodeRuntime {
+            do {
+                try await restartLeasedNodeRuntime(nodeID: nodeID)
+            } catch {
+                failure = SensitiveDataRedactor.redactedMessage(for: error)
+            }
+        }
         guard let failure else { return true }
+
         // 至少一条轨道没接受新目录：回滚声明并把两轨拉回与磁盘一致的状态，避免「UI 说开了、
         // 运行中的代理还按旧目录对外声明」这种半生效。
-        _ = ProxyViewModel.shared.setSupports1M(
+        guard ProxyViewModel.shared.setSupports1M(
             nodeID: nodeID,
-            modelID: modelID,
-            enabled: !enabled
-        )
+            modelID: normalizedModelID,
+            enabled: previousEnabled
+        ) else {
+            let rollbackFailure = AppSettings.shared.t(
+                "The 1M setting failed and its saved value could not be rolled back.",
+                "1M 设置应用失败，且无法回滚已保存的值。"
+            )
+            claudeTracks.forEach { $0.operationError = rollbackFailure }
+            ProxyViewModel.shared.operationErrorMessage = rollbackFailure
+            return false
+        }
         for manager in claudeTracks where manager.config.isEnabled
             && manager.config.activeNodeId == nodeID
             && manager.runtime.isProcessRunning {
             await manager.reapplyActiveUpstream()
         }
-        claudeTracks.forEach { $0.operationError = failure }
+        var finalFailure = failure
+        if shouldRestartNodeRuntime {
+            do {
+                try await restartLeasedNodeRuntime(nodeID: nodeID)
+            } catch {
+                let rollbackRuntimeFailure = SensitiveDataRedactor.redactedMessage(for: error)
+                finalFailure += AppSettings.shared.t(
+                    " Rollback restart also failed: \(rollbackRuntimeFailure)",
+                    " 回滚后的运行时重启也失败：\(rollbackRuntimeFailure)"
+                )
+            }
+        }
+        claudeTracks.forEach { $0.operationError = finalFailure }
+        ProxyViewModel.shared.operationErrorMessage = finalFailure
         return false
+    }
+
+    /// 节点运行时没有 admin 热切换；被全局轨租借或直接激活时，1M 声明变更后需重启进程
+    /// 才能让 QuotaServer 重新读取 `AIUSAGE_CLAUDE_SUPPORTS_1M_JSON`。
+    private static func nodeRuntimeRequiresRestart(nodeID: String) -> Bool {
+        let viewModel = ProxyViewModel.shared
+        guard let config = viewModel.configurations.first(where: { $0.id == nodeID }),
+              config.needsProxyProcess,
+              viewModel.runtimeService.isProxyRunning(nodeID) else { return false }
+        let leased = !viewModel.nodeRuntimeConsumers[nodeID, default: []].isEmpty
+        let directlyActivated = viewModel.activatedConfigId == nodeID
+        return leased || directlyActivated
+    }
+
+    private static func restartLeasedNodeRuntime(nodeID: String) async throws {
+        let viewModel = ProxyViewModel.shared
+        guard let config = viewModel.configurations.first(where: { $0.id == nodeID }),
+              config.needsProxyProcess else { return }
+        viewModel.runtimeService.stopProxyOnly(for: config)
+        do {
+            try await viewModel.runtimeService.startProxyOnly(for: config)
+            viewModel.proxyRuntimeDownConfigIds.remove(nodeID)
+        } catch {
+            viewModel.proxyRuntimeDownConfigIds.insert(nodeID)
+            globalProxyManagerLog.error(
+                "Failed to restart node runtime after 1M catalog change for \(nodeID, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+            throw error
+        }
     }
 
     /// Changes the public model surface exposed to Claude Desktop while
@@ -536,13 +601,14 @@ final class GlobalProxyManager: ObservableObject {
         }
     }
 
-    func switchActiveNode(to nodeId: String) async {
-        guard !isBusy else { return }
+    @discardableResult
+    func switchActiveNode(to nodeId: String) async -> Bool {
+        guard !isBusy else { return false }
         guard isRuntimeEnabled, runtime.isProcessRunning else {
             await enable(activeNodeId: nodeId)
-            return
+            return isRuntimeEnabled && runtime.isProcessRunning && config.activeNodeId == nodeId && operationError == nil
         }
-        guard nodeId != config.activeNodeId else { return }
+        guard nodeId != config.activeNodeId else { return true }
         let previousNodeId = config.activeNodeId
         let previousConfig = config
         isBusy = true
@@ -551,7 +617,7 @@ final class GlobalProxyManager: ObservableObject {
 
         guard let selectedNode = node(for: nodeId), let payload = adapter.switchPayload(config: config, nodeId: nodeId) else {
             operationError = AppSettings.shared.t("Selected node not found.", "未找到所选节点。")
-            return
+            return false
         }
 
         var acquiredNewLease = false
@@ -567,7 +633,7 @@ final class GlobalProxyManager: ObservableObject {
                 nodeName: selectedNode.name
             )
             config.activeNodeId = nodeId
-            if track == .claude, config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
+            if track == .codex || (track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog) {
                 try adapter.activateCLIConfig(config)
             }
             guard persist() else {
@@ -582,7 +648,7 @@ final class GlobalProxyManager: ObservableObject {
                         nodeName: previousNode.name
                     )
                 }
-                if track == .claude, config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
+                if track == .codex || (track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog) {
                     try? adapter.activateCLIConfig(config)
                 }
                 throw GlobalProxyRuntimeError.startFailed("failed to save Gateway route")
@@ -595,6 +661,7 @@ final class GlobalProxyManager: ObservableObject {
             if track == .desktop {
                 NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
             }
+            return true
         } catch {
             config = previousConfig
             if let previousNodeId,
@@ -608,7 +675,7 @@ final class GlobalProxyManager: ObservableObject {
                     nodeName: previousNode.name
                 )
             }
-            if track == .claude, config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
+            if track == .codex || (track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog) {
                 try? adapter.activateCLIConfig(config)
             }
             if acquiredNewLease, let consumer = nodeRuntimeConsumer {
@@ -616,6 +683,7 @@ final class GlobalProxyManager: ObservableObject {
             }
             operationError = error.localizedDescription
             globalProxyManagerLog.error("Failed to switch global proxy node (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
+            return false
         }
     }
 
