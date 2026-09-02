@@ -71,6 +71,12 @@ final class GlobalProxyManager: ObservableObject {
     var activeNodeId: String? { config.activeNodeId }
     var isProxyRunning: Bool { runtime.isProcessRunning }
 
+    /// Rewrites only the CLI configuration after an external edit was accepted
+    /// as the new baseline. The running proxy process is left untouched.
+    func reapplyCLIConfig() throws {
+        try adapter.activateCLIConfig(config)
+    }
+
     /// 可参与全局代理的节点（由适配器按轨/接口筛选）。
     func availableNodes() -> [GlobalProxyNodeRef] { adapter.availableNodes(config: config) }
 
@@ -717,6 +723,17 @@ final class GlobalProxyManager: ObservableObject {
     }
 
     func disable() async {
+        await disable(forceExternalChanges: false)
+    }
+
+    /// Explicit recovery path for a CLI config changed outside AIUsage. Only the
+    /// user-facing recovery action should call this; ordinary disable remains
+    /// fail-closed to avoid overwriting someone else's edit.
+    func disableDiscardingExternalConfigChanges() async {
+        await disable(forceExternalChanges: true)
+    }
+
+    private func disable(forceExternalChanges: Bool) async {
         guard !isBusy else { return }
         isBusy = true
         operationError = nil
@@ -724,7 +741,11 @@ final class GlobalProxyManager: ObservableObject {
 
         let previousConfig = config
         do {
-            try adapter.restoreCLIConfig()
+            if forceExternalChanges {
+                try adapter.restoreCLIConfigDiscardingExternalChanges()
+            } else {
+                try adapter.restoreCLIConfig()
+            }
         } catch {
             globalProxyManagerLog.error("Failed to restore CLI config on global proxy disable (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
             operationError = error.localizedDescription

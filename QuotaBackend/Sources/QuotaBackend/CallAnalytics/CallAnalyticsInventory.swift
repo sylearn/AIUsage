@@ -8,6 +8,7 @@ import Foundation
 
 struct CallAnalyticsInventory {
     let homeDirectory: String
+    var environment: [String: String] = ProcessInfo.processInfo.environment
 
     /// 「可清理」技能目录：仅用户自建 / 自行安装、能单独删除的技能目录，按来源归属。
     /// 内置（.cursor/skills-cursor）与插件缓存（plugins/cache）里的技能由工具 / 插件托管，
@@ -23,13 +24,12 @@ struct CallAnalyticsInventory {
     }
 
     /// MCP 配置文件，按来源归属。Claude 用 JSON（含项目级 projects.*.mcpServers），
-    /// OpenCode 用 JSON（mcp 键），Codex 用 TOML（[mcp_servers.NAME]）。
+    /// Codex 用 TOML（[mcp_servers.NAME]）。OpenCode 由统一 resolver 单独处理，
+    /// 按 OpenCode 的全局/附加层合并后扫描。
     private var mcpConfigFiles: [(source: CallSourceKind, path: String, format: MCPConfigFormat)] {
         [
             (.claude, "\(homeDirectory)/.claude.json", .json),
-            (.codex, "\(homeDirectory)/.codex/config.toml", .codexTOML),
-            (.opencode, "\(homeDirectory)/.config/opencode/opencode.json", .json),
-            (.opencode, "\(homeDirectory)/.config/opencode/opencode.jsonc", .json)
+            (.codex, "\(homeDirectory)/.codex/config.toml", .codexTOML)
         ]
     }
 
@@ -60,6 +60,15 @@ struct CallAnalyticsInventory {
             case .codexTOML: collectCodexTOMLMCPNames(path: config.path, into: &names)
             }
             for name in names { items.insert(InstalledItem(source: config.source, name: name)) }
+        }
+
+        let resolver = OpenCodeConfigResolver(homeDirectory: homeDirectory, environment: environment)
+        var openCodeNames = Set<String>()
+        if let object = resolver.readEffectiveObject() {
+            addServerKeys(from: object, into: &openCodeNames)
+        }
+        for name in openCodeNames {
+            items.insert(InstalledItem(source: .opencode, name: name))
         }
         return items.sorted { ($0.name, $0.source.rawValue) < ($1.name, $1.source.rawValue) }
     }

@@ -63,7 +63,7 @@ AIUsage/
     ├── StatsHubView.swift          # "Usage Stats" entry (thin wrapper over ProxyStatsView)
     ├── ProxyManagementView.swift   # Proxy node list (family-filtered: .claude / .codex) + gesture drag-to-reorder
     ├── CodexProxyManagementView.swift # Codex proxy menu (wraps ProxyManagementView(family: .codex))
-    ├── OpenCodeManagementView.swift # OpenCode proxy menu (node list + opencode.json[c] takeover; JSONC via JSONCSanitizer)
+    ├── OpenCodeManagementView.swift # OpenCode proxy menu (node list + resolved config takeover; JSONC-preserving editor)
     ├── CodexProxyEditorView.swift  # Codex node editor (single model)
     ├── SystemProxyWarningBanner.swift # System-proxy notice in Codex menu
     ├── ProxyStatsView.swift        # Proxy usage statistics (family-aware)
@@ -237,7 +237,7 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 
 - **Claude Code 轨道**（`.anthropicDirect` / `.openaiProxy`）：写 `~/.claude/settings.json`。由 `ProxyViewModel` 用 `activatedConfigId` 跟踪。
 - **Codex 轨道**（`.codexProxy`）：写 `~/.codex/config.toml`（`CodexConfigManager` 外科式合并），详见 PROXY_ARCHITECTURE.md「Codex 代理」章。由 `ProxyViewModel` 用 `activatedCodexConfigId` 跟踪。Claude/Codex 互斥仅限同家族 `ProxyNodeFamily`。
-- **OpenCode 轨道**：由 `OpenCodeNodeStore` + `OpenCodeConfigManager` 独立管理（不经 `ProxyViewModel`），接管 `~/.config/opencode/opencode.json[c]`；支持 JSONC（注释/尾随逗号经 `JSONCSanitizer` 容错解析，原文由逐字备份保真还原）。
+- **OpenCode 轨道**：由 `OpenCodeNodeStore` + `OpenCodeConfigManager` 独立管理（不经 `ProxyViewModel`），通过 `OpenCodeConfigResolver` 按 OpenCode 的真实顺序合并全局 `config.json → opencode.json → opencode.jsonc`，并报告 `OPENCODE_CONFIG`、`OPENCODE_CONFIG_DIR`、`OPENCODE_CONFIG_CONTENT` 等后续层；接管期间使用 durable session 固定管理目标，`JSONCEditor` 做局部文本更新并保留用户注释。
 
 **Process lifecycle** (managed by `ProxyViewModel` + `ProxyRuntimeService`):
 
@@ -274,8 +274,8 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 | `~/.config/aiusage/usage-archive/proxy-usage-codex-v1.json` | Codex proxy daily usage archive; same frozen-cost semantics |
 | `~/.codex/config.toml` | Codex configuration; managed `model_provider=aiusage-proxy` block injected on activation (chmod 0600) |
 | `~/.codex/config.toml.aiusage.bak` | Backup of `config.toml` before injection (backup-as-source-of-truth; removed on restore) |
-| `~/.config/opencode/opencode.json` 或 `opencode.jsonc` | OpenCode configuration; managed provider entries injected on activation. `$XDG_CONFIG_HOME` 优先；存在 `.jsonc` 时优先接管 `.jsonc`（JSONC 经 `JSONCSanitizer` 容错解析） |
-| `~/.config/opencode/opencode.json[c].aiusage.bak` | Backup of the OpenCode config before takeover (verbatim copy preserves comments/formatting; restored on deactivation) |
+| `$XDG_CONFIG_HOME/opencode/config.json`、`opencode.json`、`opencode.jsonc`（默认 `~/.config/opencode/`） | OpenCode 全局配置层；三者按顺序深合并。AIUsage 只管理最高优先级的专用 `opencode.json[c]` 层，`config.json` 只读；编辑器保持 JSONC 注释与排版 |
+| `~/.config/aiusage/opencode-takeover.json` + `opencode-takeover-backup/` | Durable takeover session：固定目标路径、原文快照、哈希、权限和恢复状态；外部修改时 fail-closed，用户明确选择后才接受或丢弃 |
 | `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
 | `~/Library/Application Support/AIUsage/CLIProxyAPI/` | CPA versioned binaries, `current` symlink, preserved `config.yaml`, auth directory, stable plugin data, settings and account-sync manifest. Duplicate-auth rollback payloads are memory-only; no second token-bearing backup directory is created. |
 | `~/Library/Application Support/AIUsage/CLIProxyAPI/account-sync-manifest.json` | Mode, file linkage, optional provider-prefixed native-identity digest, timestamps and one-way content fingerprints; never credential JSON or token material. Existing v1 records without native identity remain readable. |

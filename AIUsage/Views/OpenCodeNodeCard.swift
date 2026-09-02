@@ -119,7 +119,7 @@ struct OpenCodeNodeCard: View, Equatable {
                     .toggleStyle(ProxyActivationToggleStyle(brandColor: brand, isBusy: isBusy))
                     .disabled(isBusy || (!isActive && activationDisabled))
                     .help(isActive
-                          ? L("Restore opencode.json", "还原 opencode.json")
+                          ? L("Restore OpenCode configuration", "还原 OpenCode 配置")
                           : L("Apply to OpenCode", "接入 OpenCode"))
 
                     // 仅代理开关（与 Claude/Codex 卡片同语义）：代理模式节点专属；
@@ -137,7 +137,7 @@ struct OpenCodeNodeCard: View, Equatable {
                               ? L("Unavailable while applied to OpenCode (the proxy runs with activation)", "接入 OpenCode 时不可用（代理随激活运行）")
                               : isProxyOnlyRunning
                               ? L("Stop Proxy", "停止代理")
-                              : L("Start the proxy on 127.0.0.1:\(String(node.proxyPort)) without touching opencode.json", "仅启动本地代理（127.0.0.1:\(String(node.proxyPort))），不接管 opencode.json"))
+                              : L("Start the proxy on 127.0.0.1:\(String(node.proxyPort)) without changing the global OpenCode configuration", "仅启动本地代理（127.0.0.1:\(String(node.proxyPort))），不修改全局 OpenCode 配置"))
                     }
 
                     Button(action: onCopyLaunchCommand) {
@@ -149,8 +149,8 @@ struct OpenCodeNodeCard: View, Equatable {
                     .buttonStyle(.plain)
                     .disabled(!node.isComplete)
                     .help(L(
-                        "Copy a launch command that runs OpenCode with this node's config (OPENCODE_CONFIG), without touching the global opencode.json.",
-                        "复制启动命令：用该节点配置启动 OpenCode（OPENCODE_CONFIG），不改全局 opencode.json。"
+                        "Copy a launch command that runs OpenCode with this node's config (OPENCODE_CONFIG), without changing the global OpenCode configuration.",
+                        "复制启动命令：用该节点配置启动 OpenCode（OPENCODE_CONFIG），不修改全局 OpenCode 配置。"
                     ))
 
                     connectivityControl
@@ -417,7 +417,7 @@ struct OpenCodeNodeCard: View, Equatable {
     private var cardContextMenu: some View {
         Button { onToggleActivation() } label: {
             Label(
-                isActive ? L("Restore opencode.json", "还原 opencode.json") : L("Apply to OpenCode", "接入 OpenCode"),
+                isActive ? L("Restore OpenCode configuration", "还原 OpenCode 配置") : L("Apply to OpenCode", "接入 OpenCode"),
                 systemImage: isActive ? "stop.circle" : "power.circle"
             )
         }

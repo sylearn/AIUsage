@@ -1,10 +1,11 @@
 import SwiftUI
 import os.log
+import QuotaBackend
 
 // MARK: - Local Settings Editor View
 // In-app editor for a live JSON config file (syntax highlighting via JSONRawEditorView).
 // 默认指向 ~/.claude/settings.json（Claude 页），其他页（如 OpenCode 的
-// opencode.json）通过参数复用同一查看/编辑体验。
+// OpenCode 受管层）通过参数复用同一查看/编辑体验。
 
 private let localSettingsLog = Logger(subsystem: "com.aiusage.desktop", category: "LocalSettingsEditor")
 
@@ -16,6 +17,8 @@ struct LocalSettingsEditorView: View {
     /// 头部展示的文件名（默认按 home 缩写）。
     var displayTitle: String = "~/.claude/settings.json"
     var subtitle: String = L("Live configuration file for Claude Code", "Claude Code 当前生效的配置文件")
+    /// 保存成功后通知拥有者刷新其配置真相源状态（例如 OpenCode 的接管哈希）。
+    var onSaved: (() -> Void)? = nil
 
     @State private var jsonText = ""
     @State private var jsonError: String?
@@ -33,7 +36,7 @@ struct LocalSettingsEditorView: View {
             headerBar
             Divider()
             JSONRawEditorView(jsonText: $jsonText, error: $jsonError)
-                .onChange(of: jsonText) { _ in
+                .onChange(of: jsonText) { _, _ in
                     guard !isLoadingFile else { return }
                     hasUnsavedChanges = true
                     showSaveSuccess = false
@@ -135,7 +138,9 @@ struct LocalSettingsEditorView: View {
             DispatchQueue.main.async { isLoadingFile = false }
             return
         }
-        if let obj = try? JSONSerialization.jsonObject(with: data),
+        if filePath.hasSuffix(".jsonc") {
+            jsonText = String(data: data, encoding: .utf8) ?? "{}"
+        } else if let obj = try? JSONSerialization.jsonObject(with: data),
            let pretty = try? JSONSerialization.data(
                withJSONObject: obj,
                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -154,7 +159,13 @@ struct LocalSettingsEditorView: View {
             return
         }
         do {
-            if let strict = try? JSONSerialization.jsonObject(with: data) {
+            if filePath.hasSuffix(".jsonc") {
+                guard JSONCEditor.parseObject(jsonText) != nil else {
+                    jsonError = L("Root must be a valid JSONC object", "根节点必须是有效的 JSONC 对象")
+                    return
+                }
+                try persist(data)
+            } else if let strict = try? JSONSerialization.jsonObject(with: data) {
                 // 纯 JSON：沿用「美化 + 排序」写盘（如 ~/.claude/settings.json）。
                 guard strict is [String: Any] else {
                     jsonError = L("Root must be a JSON object", "根节点必须是 JSON 对象")
@@ -166,17 +177,11 @@ struct LocalSettingsEditorView: View {
                 )
                 try persist(prettyData)
             } else {
-                // JSONC（含注释/尾随逗号，如 opencode.jsonc）：校验可解析后原样写回，保留注释与排版。
-                let sanitized = JSONCSanitizer.sanitize(jsonText)
-                guard let sanitizedData = sanitized.data(using: .utf8),
-                      let obj = try? JSONSerialization.jsonObject(with: sanitizedData),
-                      obj is [String: Any] else {
-                    jsonError = L("Root must be a JSON object", "根节点必须是 JSON 对象")
-                    return
-                }
-                try persist(data)
+                jsonError = L("Root must be a valid JSON object", "根节点必须是有效的 JSON 对象")
+                return
             }
             markSaved()
+            onSaved?()
         } catch {
             jsonError = error.localizedDescription
         }

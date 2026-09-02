@@ -169,7 +169,13 @@ final class APIProviderDistributor {
         case .claude:
             if let child = claudeChild(for: providerId) { await proxyVM.deleteConfiguration(child.id) }
         case .openCode:
-            if let child = openCodeChild(for: providerId) { openCodeStore.delete(child) }
+            if let child = openCodeChild(for: providerId) {
+                do {
+                    try openCodeStore.delete(child)
+                } catch {
+                    gateway.lastError = error.localizedDescription
+                }
+            }
         case .cpa:
             if let name = cpaLinks.cpaName(for: providerId) {
                 do {

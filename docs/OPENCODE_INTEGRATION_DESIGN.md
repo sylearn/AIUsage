@@ -189,26 +189,52 @@ opencode.db ──复制 db/-wal/-shm 到临时目录──► SQLite 只读查�
 | 文件 | 职责 |
 |------|------|
 | `Models/OpenCodeNode.swift` | 节点模型：name / baseURL / apiKey / models / defaultModel / 可选 limit |
-| `ViewModels/OpenCodeConfigManager.swift` | opencode.json 受管注入与还原（见 §7.2） |
+| `ViewModels/OpenCodeConfigManager.swift` | 通过统一 resolver 管理 OpenCode 配置注入、JSONC 局部更新、durable session 与安全还原（见 §7.2） |
 | `ViewModels/OpenCodeNodeStore.swift` | 节点持久化（`~/.config/aiusage/opencode-nodes.json`，0600）+ 激活状态对账 |
 | `Views/OpenCodeManagementView.swift` | 「OpenCode 代理」主视图：状态横幅 / 节点卡片 / 激活停用 |
 | `Views/OpenCodeNodeEditorView.swift` | 节点编辑 sheet |
 | `Models/AppSettings.swift` | `AppSection` 加 `opencodeManagement` |
 | `Views/ContentView.swift` | 侧边栏「OpenCode 代理」入口（teal 品牌图标，与 Claude/Codex 代理并列） |
 
-### 7.2 配置切换器：opencode.json 受管块
+### 7.2 配置切换器：OpenCode 全局受管层
 
 - `OpenCodeConfigManager`（镜像 `CodexConfigManager` 的 backup-as-source-of-truth）：
-  - 注入受管键 `provider["aiusage-<节点 slug>"]`（`npm: "@ai-sdk/openai-compatible"` + baseURL/apiKey/models）+ 顶层 `model: "aiusage-<slug>/<模型>"`；备份 `opencode.json.aiusage.bak`；还原即整文件回滚，重复激活/切换节点幂等（剥离所有 `aiusage*` 前缀键）。
+  - 注入受管键 `provider["aiusage-<节点 slug>"]`（`npm: "@ai-sdk/openai-compatible"` + baseURL/apiKey/models）+ 顶层 `model: "aiusage-<slug>/<模型>"`；首次接管建立 durable session 和原文快照；还原始终回到 session 固定的文件，重复激活/切换节点幂等（剥离所有 `aiusage*` 前缀键）。
   - **路线 A（消息级节点归因，已实现）**：provider 键按节点区分（`OpenCodeNode.providerSlug`，首次保存生成且改名不变），opencode.db 的消息携带它作为 `providerID`，Phase 1 统计据此把用量/费用归因到具体节点，无需代理。
-  - JSON 结构化读写（`JSONSerialization`，pretty + sortedKeys）；检测到 `opencode.jsonc`（无法保真注释）或解析失败时拒绝接管并在 UI 横幅提示。
+  - 配置路径与格式不由 UI 各自猜测：`OpenCodeConfigResolver` 是唯一发现入口。它按 OpenCode 1.17.x 的顺序识别并合并全局 `config.json → opencode.json → opencode.jsonc`，同时报告当前进程可见的 `OPENCODE_CONFIG`、`OPENCODE_CONFIG_DIR` 和 `OPENCODE_CONFIG_CONTENT`；统计、编辑器、节点激活共用同一 `OpenCodeConfigResolution`。
+  - AIUsage 管理最高优先级的专用全局层：优先复用 `opencode.jsonc`，其次 `opencode.json`，两者都没有时创建 `opencode.jsonc`；低优先级 `config.json` 只读并参与合并，不改写、不扁平化。
+  - 接管不是“每次启动重新选文件”：`OpenCodeTakeoverSession` 持久化绑定目标路径、格式、原文备份、哈希和权限。接管期间配置层发生变化不会把恢复目标静默切换到另一份文件，而是显示状态并等待用户选择。
+  - JSONC 使用 `JSONCEditor` 解析和局部补丁（插入/替换/删除实际变化的键），保留用户注释、尾随逗号和未变化子树；写后重新解析自校验，不通过才回退为结构化 JSON 写回。
+  - 每次配置 + `auth.json` 写入都在同一操作事务中；恢复先校验受管文件哈希，外部修改或删除默认拒绝覆盖。UI 提供“保留修改/保留删除”和“恢复快照”两个显式路径，后者才允许 force restore；成功写回并校验后才删除 manifest/backup。
   - 写入后恢复 0600 权限。
   - **密钥与配置分离（issue #65）**：直连模式的上游 API Key 不再内联进受管块，而是走 OpenCode 官方位置 `~/.local/share/opencode/auth.json`（`OpenCodeAuthStore`，0600），格式 `{"aiusage-<slug>": {"type": "api", "key": "…"}}`——键名必须与 `opencode.json` 里的 provider 键一致，OpenCode 启动时按 provider id 取凭据注入 SDK。`opencode.json` 只留 `baseURL`/`models`，因此该文件被同步/备份/分享时不含密钥。
     - 代理模式受管块仍内联 client key（代理鉴权用，非上游密钥）；激活代理模式时会清掉本节点残留的直连凭据，否则 auth.json 里的 key 会覆盖它。
     - 停用（`restore()`）连带清掉全部 `aiusage*` 凭据，密钥不在停用后留在盘上；用户自己 `opencode auth login` 存的其他 provider 项原样保留。
     - auth.json 写不动时回退为内联 `apiKey`——否则 OpenCode 拿不到凭据，激活即失效。
     - 「复制启动命令」导出的是自带凭据的独立配置（0600，`OPENCODE_CONFIG=`），固定内联 key，不依赖 auth.json 里有没有本节点的项。
-  - 启动对账：用户手动改回 opencode.json 后自动清除激活标记（`OpenCodeNodeStore.reconcileWithConfigFile`）。
+  - 启动对账：`OpenCodeNodeStore.reconcileWithConfigFile` 使用同一 management state 识别正常受管、目标缺失、外部修改和优先级变化；不把异常状态误报为已断开，也不在外部变更时自动覆盖。
+
+### 7.2.1 配置真相源与用户心智模型（Issue #68）
+
+配置类问题反复出现的根因不是某个扩展名漏改，而是“OpenCode 实际读取哪份文件”“AIUsage 正在管理哪份文件”“用户刚刚编辑的是哪份文件”曾经由多个模块分别判断。最佳方案把它们收敛为一条链：
+
+```text
+OpenCodeConfigResolver
+        ↓
+OpenCodeConfigResolution（有序配置层、管理目标、环境覆盖提示）
+        ↓
+OpenCodeTakeoverSession（持久化目标 + 原文快照 + 哈希/权限）
+        ↓
+JSONCEditor / 原子事务写入
+        ↓
+OpenCodeNodeStore、统计、编辑器、恢复 UI 共用同一状态
+```
+
+用户只需要理解三件事：
+
+1. 页面显示“AIUsage 管理的全局配置层”名称和完整路径，并列出在它之前合并的低优先级全局层；不再暗示 OpenCode 只读取一份文件。
+2. `OPENCODE_CONFIG`、`OPENCODE_CONFIG_DIR`、`OPENCODE_CONFIG_CONTENT` 或项目配置可能在管理层之后覆盖路由。AIUsage 能检测当前进程可见的环境层，无法预知任意工作目录下的项目配置，因此页面明确提示该边界。
+3. AIUsage 接管期间目标路径固定。用户在外部改动、删除文件或改变配置层时，页面显示恢复状态，不会悄悄覆盖或把恢复目标换走。用户可以选择把自己的改动接受为新基线，或明确恢复接管前快照。
 
 ### 7.3 暂缓项
 
@@ -405,7 +431,7 @@ opencode.json，配合「复制启动命令」独立接入。`OpenCodeProxyRunti
 未运行」节点的端口，重启按钮拉起全部停摆实例。
 
 **菜单栏切换器**：控制台新增 OpenCode 轨道（Codex → OpenCode → Claude Code，
-与侧边栏同序），节点列表勾选当前生效、点击激活/还原 opencode.json；
+与侧边栏同序），节点列表勾选当前激活、点击激活/还原 AIUsage 管理的 OpenCode 全局配置层；
 三轨道共用 `trackSwitcherLabel` 外观。
 
 **cc-switch 同步**（`OpenCodeNodeStore+CCSwitchSync.swift`）：cc-switch v3.x 把

@@ -154,15 +154,24 @@ final class CodexWebSocketTests: XCTestCase {
         XCTAssertEqual((body["input"] as? [Any])?.count, 3)
     }
 
+    func testWebSocketTransportFieldsAreStripped() async throws {
+        let store = CodexWebSocketContextStore()
+        let prepared = try await store.prepare(event: [
+            "type": "response.create",
+            "model": "gpt-test",
+            "input": "ping",
+            "stream": true,
+            "background": false,
+            "stream_options": ["include_usage": true],
+        ])
+        let body = try jsonObject(try XCTUnwrap(prepared.httpBody))
+        XCTAssertEqual(body["stream"] as? Bool, true)
+        XCTAssertNil(body["background"])
+        XCTAssertNil(body["stream_options"])
+    }
+
     func testWebSocketOnlyFieldsAndTypesAreValidated() async {
         let store = CodexWebSocketContextStore()
-        await XCTAssertThrowsErrorAsync {
-            _ = try await store.prepare(event: [
-                "type": "response.create",
-                "model": "gpt-test",
-                "stream": true,
-            ])
-        }
         await XCTAssertThrowsErrorAsync {
             _ = try await store.prepare(event: [
                 "type": "response.create",

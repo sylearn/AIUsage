@@ -40,12 +40,21 @@ protocol GlobalProxyTrackAdapter {
     func activateCLIConfig(_ config: GlobalProxyConfig) throws
     /// 还原 CLI 配置：清除受管理项 / 从备份还原。
     func restoreCLIConfig() throws
+    /// 显式丢弃外部修改后的恢复路径。默认与普通恢复相同，OpenCode 使用
+    /// 自己的 durable takeover session 做 force restore。
+    func restoreCLIConfigDiscardingExternalChanges() throws
 
     /// 本轨「每节点激活」当前激活 id（启用全局前先停掉它，干净交接）。
     func currentPerNodeActiveId() -> String?
     func deactivatePerNode(_ id: String) async
     /// Gateway 接管失败时恢复刚才停用的每节点路由。
     func activatePerNode(_ id: String) async
+}
+
+extension GlobalProxyTrackAdapter {
+    func restoreCLIConfigDiscardingExternalChanges() throws {
+        try restoreCLIConfig()
+    }
 }
 
 // MARK: - Codex Adapter
@@ -432,6 +441,10 @@ struct OpenCodeGlobalProxyAdapter: GlobalProxyTrackAdapter {
 
     func restoreCLIConfig() throws {
         try OpenCodeConfigManager.shared.restore()
+    }
+
+    func restoreCLIConfigDiscardingExternalChanges() throws {
+        try OpenCodeConfigManager.shared.restoreDiscardingExternalChanges()
     }
 
     func currentPerNodeActiveId() -> String? {

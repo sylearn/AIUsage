@@ -415,31 +415,15 @@ actor CodexWebSocketContextStore {
         routeOwner owner: AnyObject? = nil
     ) throws -> CodexWebSocketPreparedRequest {
         if let owner { resetIfRouteChanged(owner) }
-        if event["stream"] != nil {
-            throw CodexWebSocketRequestError(
-                code: "unsupported_parameter",
-                message: "'stream' is implicit in WebSocket mode.",
-                param: "stream"
-            )
-        }
-        if event["background"] != nil {
-            throw CodexWebSocketRequestError(
-                code: "unsupported_parameter",
-                message: "'background' is not supported in WebSocket mode.",
-                param: "background"
-            )
-        }
-        if event["stream_options"] != nil {
-            throw CodexWebSocketRequestError(
-                code: "unsupported_parameter",
-                message: "'stream_options' is not supported in WebSocket mode.",
-                param: "stream_options"
-            )
-        }
 
         var body = event
         body.removeValue(forKey: "type")
         body.removeValue(forKey: "stream_id")
+        // HTTP-shaped clients (e.g. Codex CLI) may still send transport-specific fields.
+        // WebSocket mode treats streaming as implicit; strip rather than fail the turn.
+        body.removeValue(forKey: "stream")
+        body.removeValue(forKey: "background")
+        body.removeValue(forKey: "stream_options")
         let generate: Bool
         if let value = body.removeValue(forKey: "generate") {
             guard let boolValue = value as? Bool else {

@@ -4,7 +4,7 @@ import QuotaBackend
 
 // MARK: - OpenCode Management View
 // 「OpenCode 代理」主视图，与 Claude/Codex 节点管理页同一套骨架：
-// 状态横幅 → 工具栏（opencode.json / 导入 / 导出 / 新建）→ 汇总条 → 节点列表。
+// 状态横幅 → 工具栏（全局配置层 / 导入 / 导出 / 新建）→ 汇总条 → 节点列表。
 // 单击节点卡片内联展开：配置明细（卡片内）+ 统计信息 + 最近请求（卡片下方）。
 // 直连模式: 激活即把节点写入受管 provider 块，停用即整文还原。
 // 代理模式（路线 B）: 激活同时拉起本地透传进程，opencode.json 指向 127.0.0.1。
@@ -23,7 +23,7 @@ struct OpenCodeManagementView: View {
     @State var actionError: String?
     @State var importSummary: String?
     @State var isSyncingCCSwitch = false
-    /// opencode.json 内嵌编辑器（语法高亮，与 Claude 页 settings.json 同款）。
+    /// AIUsage 管理的 OpenCode 全局层内嵌编辑器（语法高亮，与 Claude 页同款）。
     @State var showConfigFileEditor = false
     @State private var activationInProgress = false
     /// 单击展开详情的节点 id（再次单击收起）。
@@ -41,10 +41,14 @@ struct OpenCodeManagementView: View {
     var body: some View {
         VStack(spacing: 0) {
             if store.nodes.isEmpty {
-                emptyState
+                VStack(spacing: 16) {
+                    configStateBanner
+                    emptyState
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
+                        configStateBanner
                         proxyErrorBanner
                         actionBar
                         OpenCodeOverviewStrip(store: store, statsStore: statsStore, proxyRuntime: proxyRuntime)
@@ -72,8 +76,9 @@ struct OpenCodeManagementView: View {
         .sheet(isPresented: $showConfigFileEditor) {
             LocalSettingsEditorView(
                 filePath: store.configPath,
-                displayTitle: "~/.config/opencode/\((store.configPath as NSString).lastPathComponent)",
-                subtitle: L("Live configuration file for OpenCode", "OpenCode 当前生效的配置文件")
+                displayTitle: store.configDisplayPath,
+                subtitle: L("Global configuration layer managed by AIUsage", "AIUsage 管理的 OpenCode 全局配置层"),
+                onSaved: { handleSavedLiveConfig() }
             )
         }
         .alert(
@@ -90,16 +95,20 @@ struct OpenCodeManagementView: View {
         ) {
             Button(L("Delete", "删除"), role: .destructive) {
                 if let node = pendingDeletion {
-                    if selectedNodeId == node.id { selectedNodeId = nil }
-                    store.delete(node)
+                    do {
+                        try store.delete(node)
+                        if selectedNodeId == node.id { selectedNodeId = nil }
+                    } catch {
+                        actionError = error.localizedDescription
+                    }
                 }
                 pendingDeletion = nil
             }
             Button(L("Cancel", "取消"), role: .cancel) { pendingDeletion = nil }
         } message: {
             Text(L(
-                "The node and its API key will be removed. If it is active, opencode.json will be restored first.",
-                "节点及其 API Key 将被移除。若该节点正在生效，将先还原 opencode.json。"
+                "The node and its API key will be removed. If it is active, the OpenCode configuration will be restored first.",
+                "节点及其 API Key 将被移除。若该节点正在生效，将先还原 OpenCode 配置。"
             ))
         }
         .alert(
@@ -321,8 +330,8 @@ struct OpenCodeManagementView: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(L(
-                "Add an upstream endpoint (OpenAI-compatible, Anthropic, or OpenAI Responses). Activating a node writes it into opencode.json — directly, or through a local proxy when you want per-request logs.",
-                "添加一个上游接入点（OpenAI 兼容 / Anthropic / OpenAI Responses）。激活节点会把它写入 opencode.json——默认直连；需要请求日志时可开启本地代理模式。"
+                "Add an upstream endpoint (OpenAI-compatible, Anthropic, or OpenAI Responses). Activating a node writes it into \(store.configFileName) — directly, or through a local proxy when you want per-request logs.",
+                "添加一个上游接入点（OpenAI 兼容 / Anthropic / OpenAI Responses）。激活节点会把它写入 \(store.configFileName)——默认直连；需要请求日志时可开启本地代理模式。"
             ))
             .font(.caption)
             .foregroundStyle(.tertiary)
@@ -381,6 +390,7 @@ struct OpenCodeManagementView: View {
                 try await store.activate(node)
                 statsStore.refresh()
             } catch {
+                store.refreshConfigContext()
                 actionError = error.localizedDescription
             }
         }
@@ -391,6 +401,80 @@ struct OpenCodeManagementView: View {
             try store.deactivate()
             statsStore.refresh()
         } catch {
+            store.refreshConfigContext()
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// Saving from AIUsage's own editor is already an explicit review action,
+    /// so rebase and reapply immediately instead of showing an extra drift alert.
+    func handleSavedLiveConfig() {
+        Task { @MainActor in
+            store.refreshConfigContext()
+            guard store.configManagementState == .externallyModified else { return }
+            await keepExternalConfigChanges()
+        }
+    }
+
+    func keepExternalConfigChanges() async {
+        do {
+            try store.acceptExternalConfigChanges()
+            if GlobalProxyManager.opencode.isEnabled {
+                try GlobalProxyManager.opencode.reapplyCLIConfig()
+            } else if let node = store.activeNode {
+                try await store.activate(node)
+            }
+            store.refreshConfigContext()
+        } catch {
+            store.refreshConfigContext()
+            actionError = error.localizedDescription
+        }
+    }
+
+    func keepMissingConfigDeletion() async {
+        do {
+            try store.acceptExternalConfigChanges()
+            if GlobalProxyManager.opencode.isEnabled {
+                await GlobalProxyManager.opencode.disableDiscardingExternalConfigChanges()
+                if let error = GlobalProxyManager.opencode.operationError {
+                    throw NSError(domain: "AIUsage.OpenCode", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
+                }
+            } else {
+                try store.discardExternalConfigChanges()
+            }
+            store.refreshConfigContext()
+        } catch {
+            store.refreshConfigContext()
+            actionError = error.localizedDescription
+        }
+    }
+
+    func switchToPreferredConfig() async {
+        guard !activationInProgress else { return }
+        activationInProgress = true
+        defer { activationInProgress = false }
+        do {
+            if GlobalProxyManager.opencode.isEnabled {
+                let nodeId = GlobalProxyManager.opencode.activeNodeId
+                await GlobalProxyManager.opencode.disable()
+                if let error = GlobalProxyManager.opencode.operationError {
+                    throw NSError(domain: "AIUsage.OpenCode", code: 2, userInfo: [NSLocalizedDescriptionKey: error])
+                }
+                if let nodeId {
+                    await GlobalProxyManager.opencode.enable(activeNodeId: nodeId)
+                    if let error = GlobalProxyManager.opencode.operationError {
+                        throw NSError(domain: "AIUsage.OpenCode", code: 3, userInfo: [NSLocalizedDescriptionKey: error])
+                    }
+                }
+            } else if let node = store.activeNode {
+                try store.deactivate()
+                try await store.activate(node)
+            } else {
+                try store.deactivate()
+            }
+            store.refreshConfigContext()
+        } catch {
+            store.refreshConfigContext()
             actionError = error.localizedDescription
         }
     }

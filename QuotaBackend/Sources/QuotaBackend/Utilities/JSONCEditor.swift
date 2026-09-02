@@ -12,6 +12,14 @@ import Foundation
 
 public enum JSONCEditor {
 
+    /// 解析根节点为对象的 JSON/JSONC。发现与编辑共用同一解析器，
+    /// 避免“能识别但不能编辑”或“能编辑但被判非法”的口径分裂。
+    public static func parseObject(_ text: String) -> [String: Any]? {
+        var parser = Parser(chars: Array(text))
+        guard let root = try? parser.parseDocument(), root.kind == .object else { return nil }
+        return root.value as? [String: Any]
+    }
+
     /// 把 `baseText` 的 JSONC 文本结构对齐到 `target`，尽量保留注释与格式。
     /// - Returns: 对齐后的 JSONC 文本；当无法安全完成（解析失败/编辑冲突/自校验失败）时返回 nil。
     public static func merge(baseText: String, target: [String: Any]) -> String? {

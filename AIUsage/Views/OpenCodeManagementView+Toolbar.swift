@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 // MARK: - OpenCodeManagementView Banners & Toolbar
-// 状态横幅（接管态/JSONC/代理异常）与顶部工具栏（opencode.json/导入/导出/新建）。
+// 状态横幅（接管态/配置层/代理异常）与顶部工具栏（全局配置/导入/导出/新建）。
 // 与 Claude/Codex 页的工具栏同款容器按钮组视觉。拆出以控制单文件规模；
 // 依赖主视图的 internal @State / store。
 
@@ -11,7 +11,7 @@ extension OpenCodeManagementView {
     // MARK: - Warning Banners
     // 仅保留异常告警（代理进程故障）；常态信息不占版面，
     // 与 Claude/Codex 页一致（接管状态由节点卡片的激活开关表达）。
-    // 注: opencode.jsonc 现已支持接管（注释由备份保真还原），不再提示迁移。
+    // JSONC 由统一编辑器保留注释与排版，不再提示迁移。
 
     /// 运行时本会话接管（建立了 Instance）、但当前进程不在运行且不在启动/重启窗口内的节点
     /// = 真·故障，需横幅提示。以「运行时是否接管」为准而非持久配置：设置关闭未恢复时为空，
@@ -48,6 +48,133 @@ extension OpenCodeManagementView {
                 ),
                 trailing: AnyView(restartProxyButton)
             )
+        }
+    }
+
+    /// Configuration drift is a first-class state, not a generic write error.
+    /// The banner gives the user the two safe choices: keep the reviewed
+    /// external edit as the new baseline, or explicitly restore the snapshot.
+    @ViewBuilder
+    var configStateBanner: some View {
+        switch store.configManagementState {
+        case .unmanaged, .managed:
+            EmptyView()
+        case .externallyModified:
+            banner(
+                icon: "exclamationmark.triangle.fill",
+                tint: .orange,
+                title: L("OpenCode config changed outside AIUsage", "OpenCode 配置已在 AIUsage 外部修改"),
+                message: L(
+                    "Review \(store.configFileName). Keep those edits as the new baseline, or restore the last AIUsage snapshot.",
+                    "请检查 \(store.configFileName)。可以保留这些修改作为新基线，也可以恢复 AIUsage 上一次接管前的快照。"
+                ),
+                trailing: AnyView(configRecoveryButtons)
+            )
+        case .targetMissing:
+            banner(
+                icon: "doc.badge.exclamationmark",
+                tint: .orange,
+                title: L("OpenCode config is missing", "OpenCode 配置文件已不存在"),
+                message: L(
+                    "\(store.configFileName) was removed while AIUsage was managing it. Restore the snapshot to reconnect OpenCode, or keep the deletion.",
+                    "AIUsage 接管期间 \(store.configFileName) 被删除。可以恢复快照重新接入 OpenCode，也可以保留删除结果。"
+                ),
+                trailing: AnyView(missingConfigRecoveryButtons)
+            )
+        case .precedenceChanged(let activeFileName):
+            banner(
+                icon: "arrow.triangle.2.circlepath",
+                tint: .orange,
+                title: L("OpenCode config precedence changed", "OpenCode 配置优先级已变化"),
+                message: L(
+                    "A higher-priority global layer, \(activeFileName), appeared while AIUsage was managing \(store.configFileName). Restore the old layer before switching management.",
+                    "AIUsage 管理 \(store.configFileName) 期间出现了更高优先级的全局层 \(activeFileName)。请先恢复旧层，再切换管理目标。"
+                ),
+                trailing: AnyView(precedenceRecoveryButtons)
+            )
+        case .overriddenByLaterLayer:
+            banner(
+                icon: "square.stack.3d.up.trianglebadge.exclamationmark",
+                tint: .orange,
+                title: L("AIUsage route is overridden", "AIUsage 路由被后续配置覆盖"),
+                message: L(
+                    "A later OpenCode layer from OPENCODE_CONFIG, OPENCODE_CONFIG_DIR, OPENCODE_CONFIG_CONTENT, or project configuration overrides the managed provider/model. Review that layer before reactivating.",
+                    "OPENCODE_CONFIG、OPENCODE_CONFIG_DIR、OPENCODE_CONFIG_CONTENT 或项目配置中的后续配置层覆盖了受管 provider/model。请检查该层后再重新激活。"
+                )
+            )
+        case .invalidConfigurationLayer:
+            banner(
+                icon: "doc.badge.ellipsis",
+                tint: .red,
+                title: L("OpenCode configuration cannot be parsed", "OpenCode 配置无法解析"),
+                message: L(
+                    "At least one visible OpenCode configuration layer contains invalid JSON/JSONC. Fix that layer before activating or restoring the proxy.",
+                    "至少一个当前可见的 OpenCode 配置层不是合法 JSON/JSONC。请先修复该层，再激活或恢复代理。"
+                )
+            )
+        }
+    }
+
+    private var configRecoveryButtons: some View {
+        HStack(spacing: 8) {
+            Button(L("Keep changes", "保留修改")) {
+                Task { await keepExternalConfigChanges() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button(L("Restore snapshot", "恢复快照")) {
+                restoreConfigDiscardingExternalChanges()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+    }
+
+    private var missingConfigRecoveryButtons: some View {
+        HStack(spacing: 8) {
+            Button(L("Keep deletion", "保留删除")) {
+                Task { await keepMissingConfigDeletion() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button(L("Restore snapshot", "恢复快照")) {
+                restoreConfigDiscardingExternalChanges()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+    }
+
+    private var precedenceRecoveryButtons: some View {
+        HStack(spacing: 8) {
+            Button(L("Use new layer", "使用新配置层")) {
+                Task { await switchToPreferredConfig() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button(L("Restore old file", "恢复旧文件")) {
+                restoreConfigDiscardingExternalChanges()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+    }
+
+    private func restoreConfigDiscardingExternalChanges() {
+        Task { @MainActor in
+            if GlobalProxyManager.opencode.isEnabled {
+                await GlobalProxyManager.opencode.disableDiscardingExternalConfigChanges()
+            } else {
+                do {
+                    try store.discardExternalConfigChanges()
+                } catch {
+                    actionError = error.localizedDescription
+                }
+            }
+            store.refreshConfigContext()
         }
     }
 
@@ -129,22 +256,32 @@ extension OpenCodeManagementView {
     }
 
     private var configFileButton: some View {
-        // OpenCode reads opencode.jsonc in preference to opencode.json, so the
-        // button has to name whichever file is actually live.
+        // This names AIUsage's concrete management layer. OpenCode itself merges
+        // several global/project/environment layers, so no single file is "live".
         let fileName = (store.configPath as NSString).lastPathComponent
+        let lowerHint = store.lowerPriorityConfigFileNames.isEmpty
+            ? ""
+            : L(
+                " Lower-priority global layers are merged first: \(store.lowerPriorityConfigFileNames.joined(separator: ", ")).",
+                " OpenCode 会先合并这些低优先级全局层：\(store.lowerPriorityConfigFileNames.joined(separator: "、"))。"
+            )
+        let customHint = store.customConfigPath.map {
+            L(" OPENCODE_CONFIG adds \($0) afterward for launches that set it.", " 设置 OPENCODE_CONFIG 的启动还会在之后合并 \($0)。")
+        } ?? ""
+        let directoryHint = store.customConfigDirectory.map {
+            L(" OPENCODE_CONFIG_DIR adds config from \($0) later in the load order.", " OPENCODE_CONFIG_DIR 还会在后续加载 \($0) 中的配置。")
+        } ?? ""
+        let inlineHint = !store.hasInlineConfigContent
+            ? ""
+            : L(" OPENCODE_CONFIG_CONTENT adds an inline layer last.", " OPENCODE_CONFIG_CONTENT 还会在最后追加内联配置。")
         return actionBarButton(
             title: fileName,
             icon: "doc.text.magnifyingglass",
             role: .file,
-            help: store.usesJSONC
-                ? L(
-                    "View and edit the live \(fileName) with syntax highlighting. OpenCode prefers opencode.jsonc, so opencode.json is ignored while this file exists.",
-                    "查看并编辑当前生效的 \(fileName)（语法高亮）。OpenCode 优先读取 opencode.jsonc，该文件存在时 opencode.json 会被忽略。"
-                )
-                : L(
-                    "View and edit the live \(fileName) with syntax highlighting.",
-                    "查看并编辑当前生效的 \(fileName)（语法高亮）。"
-                )
+            help: L(
+                "View and edit the global layer managed by AIUsage.\(lowerHint)\(customHint)\(directoryHint)\(inlineHint)",
+                "查看并编辑 AIUsage 管理的全局配置层。\(lowerHint)\(customHint)\(directoryHint)\(inlineHint)"
+            )
         ) {
             showConfigFileEditor = true
         }

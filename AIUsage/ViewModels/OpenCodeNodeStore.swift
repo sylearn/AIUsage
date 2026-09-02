@@ -7,9 +7,8 @@ import QuotaBackend
 // MARK: - OpenCode Node Store
 // OpenCode 节点的持久化与激活状态。节点列表 + activeNodeId 存为单文件
 // ~/.config/aiusage/opencode-nodes.json（含 API Key，0600 权限）。
-// 激活/停用委托 OpenCodeConfigManager 写 opencode.json；启动时与配置文件实际状态对账
-// （用户手动改回 opencode.json 后自动视为未激活）。
-// 代理模式节点：激活前先经 OpenCodeProxyRuntime 拉起本地透传进程，opencode.json 指向
+// 激活/停用委托 OpenCodeConfigManager 写受管全局层；启动时与配置文件实际状态对账。
+// 代理模式节点：激活前先经 OpenCodeProxyRuntime 拉起本地透传进程，受管层指向
 // 127.0.0.1；App 重启后对账时自动恢复代理进程（否则 OpenCode 请求会失败）。
 
 private let openCodeStoreLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeNodeStore")
@@ -27,8 +26,8 @@ enum OpenCodeNodeStoreError: LocalizedError {
             )
         case .managedByGlobalProxy:
             return AppSettings.shared.t(
-                "The OpenCode global proxy is enabled and manages opencode.json. Switch the active node from the global proxy panel, or disable it first.",
-                "OpenCode 全局代理已启用并接管 opencode.json。请在全局代理面板切换激活节点，或先停用全局代理。"
+                "The OpenCode global proxy is enabled and manages the active configuration. Switch the active node from the global proxy panel, or disable it first.",
+                "OpenCode 全局代理已启用并接管当前配置。请在全局代理面板切换激活节点，或先停用全局代理。"
             )
         }
     }
@@ -40,11 +39,11 @@ final class OpenCodeNodeStore: ObservableObject {
 
     @Published private(set) var nodes: [OpenCodeNode] = []
     @Published private(set) var activeNodeId: String?
-    /// 「仅代理」运行中的节点集合（不接管 opencode.json，仅拉起本地透传进程暴露端口，
+    /// 「仅代理」运行中的节点集合（不接管全局配置，仅拉起本地透传进程暴露端口，
     /// 供启动命令等外部接入使用）。与 Claude/Codex 同语义：可多个并行（各占一端口）、
     /// 与激活互不影响；激活某节点时该节点退出仅代理（代理随激活运行）。
     @Published private(set) var proxyOnlyNodeIds: Set<String> = []
-    /// 通用配置片段（与 Claude 页同构）：激活时按节点合并策略深合并进 opencode.json，
+    /// 通用配置片段（与 Claude 页同构）：激活时按节点合并策略深合并进受管层，
     /// 受管块与用户原文之间的中间层。持久化于 ~/.config/aiusage/opencode-global-config.json。
     @Published var globalConfig: GlobalConfig = .empty
 
@@ -86,8 +85,17 @@ final class OpenCodeNodeStore: ObservableObject {
     }
 
     var configPath: String { configManager.configPath }
+    var configFileName: String { configManager.configFileName }
+    var configDisplayPath: String { configManager.configDisplayPath }
+    var configResolution: OpenCodeConfigResolution { configManager.configResolution }
+    var configManagementState: OpenCodeConfigManagementState { configManager.managementState }
+    var lowerPriorityConfigFileNames: [String] { configManager.lowerPriorityConfigFileNames }
+    var customConfigPath: String? { configResolution.customConfigPath }
+    var customConfigDirectory: String? { configResolution.customConfigDirectory }
+    var hasInlineConfigContent: Bool { configResolution.inlineConfigParseStatus != .missing }
+    var inlineConfigContentIsInvalid: Bool { configResolution.inlineConfigParseStatus == .invalid }
 
-    /// True when `opencode.jsonc` exists, which makes OpenCode ignore `opencode.json`.
+    /// True when the selected global target is JSONC.
     var usesJSONC: Bool { configManager.usesJSONC }
 
     // MARK: - CRUD
@@ -107,7 +115,7 @@ final class OpenCodeNodeStore: ObservableObject {
         }
         save()
 
-        // 编辑当前激活节点后立即重新激活（重写 opencode.json；代理参数未变时进程原地复用）。
+        // 编辑当前激活节点后立即重新激活（重写受管层；代理参数未变时进程原地复用）。
         if updated.id == activeNodeId {
             Task { [weak self] in
                 try? await self?.activate(updated)
@@ -124,9 +132,10 @@ final class OpenCodeNodeStore: ObservableObject {
         }
     }
 
-    func delete(_ node: OpenCodeNode) {
+    func delete(_ node: OpenCodeNode) throws {
         if node.id == activeNodeId {
-            try? deactivate()
+            // 恢复失败时必须保留节点和恢复入口，不能留下“节点已删、接管会话仍在”的孤儿状态。
+            try deactivate()
         }
         if proxyOnlyNodeIds.contains(node.id) {
             stopProxyOnly(node)
@@ -194,10 +203,34 @@ final class OpenCodeNodeStore: ObservableObject {
         }
     }
 
+    /// Force SwiftUI to refresh file-resolution labels after an external file edit.
+    func refreshConfigContext() {
+        objectWillChange.send()
+    }
+
+    /// The user explicitly reviewed the current managed file and chose to keep
+    /// those edits as the new pristine restore baseline.
+    func acceptExternalConfigChanges() throws {
+        try configManager.acceptExternalChanges()
+        objectWillChange.send()
+    }
+
+    /// Explicit recovery path used after the user chooses to discard edits made
+    /// outside AIUsage. Normal deactivation remains fail-closed.
+    func discardExternalConfigChanges() throws {
+        try configManager.restoreDiscardingExternalChanges()
+        if let active = activeNode, active.proxyEnabled, !proxyOnlyNodeIds.contains(active.id) {
+            proxyRuntime.stop(nodeId: active.id)
+        }
+        activeNodeId = nil
+        save()
+        objectWillChange.send()
+    }
+
     // MARK: - Activation
 
     func activate(_ node: OpenCodeNode) async throws {
-        // 与全局统一代理互斥：全局启用时由它独占 opencode.json，每节点激活会覆盖全局受管块。
+        // 与全局统一代理互斥：全局启用时由它独占受管层，每节点激活会覆盖全局受管块。
         if GlobalProxyManager.opencode.config.isEnabled {
             throw OpenCodeNodeStoreError.managedByGlobalProxy
         }
@@ -213,7 +246,7 @@ final class OpenCodeNodeStore: ObservableObject {
                 save()
             }
             stopPreviousActiveProxyProcess(except: node.id)
-            // 代理模式：先拉起本地透传进程，再把 opencode.json 指向它；写配置失败则回收进程。
+            // 代理模式：先拉起本地透传进程，再把受管层指向它；写配置失败则回收进程。
             try await proxyRuntime.start(node: node)
             do {
                 try configManager.activate(node: node, baseURLOverride: node.proxyLocalBaseURL, commonSettings: common)
@@ -230,16 +263,18 @@ final class OpenCodeNodeStore: ObservableObject {
         }
         activeNodeId = node.id
         save()
+        objectWillChange.send()
     }
 
     func deactivate() throws {
-        // 只回收激活节点自己的代理进程；仅代理节点的进程独立存活。
+        try configManager.restore()
+        // 先成功恢复配置再停代理；恢复被外部修改拦截时保持原路由可用。
         if let active = activeNode, active.proxyEnabled, !proxyOnlyNodeIds.contains(active.id) {
             proxyRuntime.stop(nodeId: active.id)
         }
-        try configManager.restore()
         activeNodeId = nil
         save()
+        objectWillChange.send()
     }
 
     /// 切换激活目标时回收上一个激活的代理节点进程（其进程随激活存在，
@@ -253,7 +288,7 @@ final class OpenCodeNodeStore: ObservableObject {
 
     // MARK: - Proxy-Only Mode
     // 与 Claude/Codex 节点的「仅代理」同语义：拉起本地透传进程暴露端口，但不接管
-    // opencode.json。可多个节点并行（各占一端口，端口冲突由运行时报可读错误）；
+    // OpenCode 全局配置。可多个节点并行（各占一端口，端口冲突由运行时报可读错误）；
     // 激活节点的代理随激活运行，故激活中的节点不可（也无需）开仅代理。
 
     func toggleProxyOnly(_ node: OpenCodeNode) async throws {
@@ -280,11 +315,13 @@ final class OpenCodeNodeStore: ObservableObject {
         save()
     }
 
-    /// 启动对账：opencode.json 已不在受管状态（用户手动还原/删除）时清掉激活标记；
+    /// 启动对账：管理目标已不在受管状态（用户手动还原/删除）时清掉激活标记；
     /// 仅代理集合里不存在或已关掉代理模式的节点一并清理。
     func reconcileWithConfigFile() {
         var changed = false
-        if activeNodeId != nil, !configManager.isManaged {
+        if activeNodeId != nil,
+           configManager.managementState == .unmanaged,
+           !configManager.isManaged {
             activeNodeId = nil
             changed = true
         }
@@ -299,11 +336,11 @@ final class OpenCodeNodeStore: ObservableObject {
     }
 
     /// App 重启后恢复代理：激活中的代理模式节点其子进程已随上次退出而消亡，
-    /// 而 opencode.json 仍指向本地端口，必须重新拉起，否则 OpenCode 请求全部失败。
+    /// 而受管配置层仍指向本地端口，必须重新拉起，否则 OpenCode 请求全部失败。
     /// 仅代理节点同样恢复（外部工具可能仍指向这些端口）。
     private func restoreProxyIfNeeded() {
         // 与 Claude/Codex 一致：受「启动时自动恢复代理」设置控制。关闭时不接管，
-        // 并还原 opencode.json（避免它仍指向不会被拉起的本地端口）。
+        // 并还原受管配置层（避免它仍指向不会被拉起的本地端口）。
         guard AppSettings.shared.proxyAutoRestoreOnLaunch else {
             if activeNodeId != nil {
                 do { try deactivate() } catch {
@@ -312,6 +349,13 @@ final class OpenCodeNodeStore: ObservableObject {
             }
             return
         }
+
+        // A missing/modified/precedence-shifted config is not a valid active
+        // route. Keep the state visible for recovery, but do not start a proxy
+        // that OpenCode cannot currently reach. The isManaged fallback keeps
+        // pre-session versions recoverable after upgrade.
+        let state = configManager.managementState
+        guard state == .managed || (state == .unmanaged && configManager.isManaged) else { return }
 
         var toRestore: [OpenCodeNode] = []
         if let active = activeNode, active.proxyEnabled {

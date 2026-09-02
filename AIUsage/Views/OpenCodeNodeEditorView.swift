@@ -223,8 +223,8 @@ struct OpenCodeNodeEditorView: View {
             SecureKeyField("sk-...", text: $node.apiKey)
             if !node.proxyEnabled {
                 Text(L(
-                    "Stored in ~/.local/share/opencode/auth.json (0600) on activation, the same place `opencode auth login` uses. opencode.json keeps only baseURL and models.",
-                    "激活时写入 ~/.local/share/opencode/auth.json（0600），与 `opencode auth login` 同一位置；opencode.json 只保留 baseURL 与模型。"
+                    "Stored in ~/.local/share/opencode/auth.json (0600) on activation, the same place `opencode auth login` uses. The active OpenCode config keeps only baseURL and models.",
+                    "激活时写入 ~/.local/share/opencode/auth.json（0600），与 `opencode auth login` 同一位置；当前 OpenCode 配置只保留 baseURL 与模型。"
                 ))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -520,8 +520,8 @@ struct OpenCodeNodeEditorView: View {
                 selection: row.entry.outputModalities
             )
             Text(L(
-                "Leave empty to use the model's defaults. Written into the model's modalities block in opencode.json.",
-                "留空则使用模型默认值。会写入 opencode.json 中该模型的 modalities 块。"
+                "Leave empty to use the model's defaults. Written into the model's modalities block in the active OpenCode config.",
+                "留空则使用模型默认值。会写入当前 OpenCode 配置中该模型的 modalities 块。"
             ))
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
@@ -801,8 +801,8 @@ struct OpenCodeNodeEditorView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "lock.shield.fill").foregroundStyle(.green)
                         Text(L(
-                            "If set, OpenCode authenticates to the local proxy with this key (written as apiKey in opencode.json). The real upstream key stays in the proxy.",
-                            "设置后，OpenCode 用此 Key 访问本地代理（写入 opencode.json 的 apiKey）；真实上游 Key 仅保留在代理内。"
+                            "If set, OpenCode authenticates to the local proxy with this key (written as apiKey in the active config). The real upstream key stays in the proxy.",
+                            "设置后，OpenCode 用此 Key 访问本地代理（写入当前配置的 apiKey）；真实上游 Key 仅保留在代理内。"
                         ))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
