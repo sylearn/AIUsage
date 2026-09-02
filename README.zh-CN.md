@@ -266,28 +266,10 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 
 ## 赞助商
 
-<p align="center">
-  <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>API Models</strong></a> —— 面向开发者的高性价比统一 AI 模型 API。<br>
-  一套账户接入 OpenAI 兼容、Anthropic Messages 与 Gemini 接口，并提供实用接入文档和独立状态监控。<br>
-  低价按量计费，支持多种渠道支付。新用户注册即送免费使用额度。
-</p>
-
-<p align="center">
-  <img alt="协议" src="https://img.shields.io/badge/API-OpenAI%20%C2%B7%20Anthropic%20%C2%B7%20Gemini-6366f1?style=flat-square">
-  <img alt="价格" src="https://img.shields.io/badge/%E4%BB%B7%E6%A0%BC-%E4%BD%8E%E4%BB%B7%E6%8C%89%E9%87%8F%E8%AE%A1%E8%B4%B9-22c55e?style=flat-square">
-  <img alt="可用性" src="https://img.shields.io/badge/%E5%8F%AF%E7%94%A8%E6%80%A7-%E7%8B%AC%E7%AB%8B%E7%8A%B6%E6%80%81%E7%9B%91%E6%8E%A7-0ea5e9?style=flat-square">
-  <img alt="支付" src="https://img.shields.io/badge/%E6%94%AF%E4%BB%98-%E5%A4%9A%E7%A7%8D%E6%B8%A0%E9%81%93-f59e0b?style=flat-square">
-</p>
-
-<p align="center">
-  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>创建账户并获取 API →</strong></a>
-</p>
+| | **定位** | **覆盖** | |
+| --- | --- | --- | --- |
+| [<img src="docs/images/api-models-logo-light.png" alt="API Models" width="24" valign="middle"> **API Models**](https://api-models.com/sign-up?aff=mfLW) | 高性价比统一 API · 低价按量 · 注册送额度 | OpenAI 兼容 · Anthropic · Gemini · 独立监控 | [获取 API →](https://api-models.com/sign-up?aff=mfLW) |
+| [<img src="https://r2.api-models.com/logo-dark-icon.png" alt="API AI Models" width="24" valign="middle"> **API AI Models**](https://api-aimodels.com) | 400+ 模型聚合 · 多渠道切换 · 价格透明 · 稳定可靠 | 文本 / 图像 / 视频 / 音乐全系列 · Claude 官方 · AWSB · CCMax · Kiro · Seedance 2.0 · Kling · Veo · HappyHorse 等 | [访问 →](https://api-aimodels.com) |
 
 ## 友链
 

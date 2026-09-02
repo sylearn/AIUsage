@@ -266,28 +266,10 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 
 ## Sponsor
 
-<p align="center">
-  <a href="https://api-models.com/sign-up?aff=mfLW">
-    <img src="docs/images/api-models-logo-light.png" alt="API Models" width="132">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>API Models</strong></a> — cost-effective access to leading AI models through one API service.<br>
-  OpenAI-compatible, Anthropic Messages and Gemini endpoints, with practical integration guides and independent uptime monitoring.<br>
-  Low-cost pay-as-you-go pricing with multiple payment methods. New accounts include free usage credits.
-</p>
-
-<p align="center">
-  <img alt="Protocols" src="https://img.shields.io/badge/API-OpenAI%20%C2%B7%20Anthropic%20%C2%B7%20Gemini-6366f1?style=flat-square">
-  <img alt="Pricing" src="https://img.shields.io/badge/Pricing-low--cost%20pay--as--you--go-22c55e?style=flat-square">
-  <img alt="Availability" src="https://img.shields.io/badge/Availability-independently%20monitored-0ea5e9?style=flat-square">
-  <img alt="Payments" src="https://img.shields.io/badge/Payments-multiple%20methods-f59e0b?style=flat-square">
-</p>
-
-<p align="center">
-  <a href="https://api-models.com/sign-up?aff=mfLW"><strong>Create an account and get API access →</strong></a>
-</p>
+| | **Positioning** | **Coverage** | |
+| --- | --- | --- | --- |
+| [<img src="docs/images/api-models-logo-light.png" alt="API Models" width="24" valign="middle"> **API Models**](https://api-models.com/sign-up?aff=mfLW) | Cost-effective unified API · low-cost PAYG · free credits on sign-up | OpenAI-compatible · Anthropic · Gemini · independently monitored | [Get API →](https://api-models.com/sign-up?aff=mfLW) |
+| [<img src="https://r2.api-models.com/logo-dark-icon.png" alt="API AI Models" width="24" valign="middle"> **API AI Models**](https://api-aimodels.com) | 400+ model hub · multi-channel routing · transparent pricing · reliable uptime | Text · image · video · music — full lineup incl. Claude official · AWSB · CCMax · Kiro · Seedance 2.0 · Kling · Veo · HappyHorse, and more | [Visit →](https://api-aimodels.com) |
 
 ## Friendly Links
 
