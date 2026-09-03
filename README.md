@@ -269,7 +269,7 @@ Product inspiration and implementation references include [`CodexBar`](https://g
 | | **Positioning** | **Coverage** | |
 | --- | --- | --- | --- |
 | [<img src="docs/images/api-models-logo-light.png" alt="API Models" width="24" valign="middle"> **API Models**](https://api-models.com/sign-up?aff=mfLW) | Cost-effective unified API · low-cost PAYG · free credits on sign-up | OpenAI-compatible · Anthropic · Gemini · independently monitored | [Get API →](https://api-models.com/sign-up?aff=mfLW) |
-| [<img src="https://r2.api-models.com/logo-dark-icon.png" alt="API AI Models" width="24" valign="middle"> **API AI Models**](https://api-aimodels.com) | 400+ model hub · multi-channel routing · transparent pricing · reliable uptime | Text · image · video · music — full lineup incl. Claude official · AWSB · CCMax · Kiro · Seedance 2.0 · Kling · Veo · HappyHorse, and more | [Visit →](https://api-aimodels.com) |
+| [<img src="https://r2.api-models.com/logo-dark-icon.png" alt="API AI Models" width="24" valign="middle"> **API AI Models**](https://api-aimodels.com/register?aff=DrSm) | 400+ model hub · multi-channel routing · transparent pricing · reliable uptime | Text · image · video · music — full lineup incl. Claude official · AWSB · CCMax · Kiro · Seedance 2.0 · Kling · Veo · HappyHorse, and more | [Visit →](https://api-aimodels.com/register?aff=DrSm) |
 
 ## Friendly Links
 

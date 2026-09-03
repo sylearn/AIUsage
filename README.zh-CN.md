@@ -269,7 +269,7 @@ CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com
 | | **定位** | **覆盖** | |
 | --- | --- | --- | --- |
 | [<img src="docs/images/api-models-logo-light.png" alt="API Models" width="24" valign="middle"> **API Models**](https://api-models.com/sign-up?aff=mfLW) | 高性价比统一 API · 低价按量 · 注册送额度 | OpenAI 兼容 · Anthropic · Gemini · 独立监控 | [获取 API →](https://api-models.com/sign-up?aff=mfLW) |
-| [<img src="https://r2.api-models.com/logo-dark-icon.png" alt="API AI Models" width="24" valign="middle"> **API AI Models**](https://api-aimodels.com) | 400+ 模型聚合 · 多渠道切换 · 价格透明 · 稳定可靠 | 文本 / 图像 / 视频 / 音乐全系列 · Claude 官方 · AWSB · CCMax · Kiro · Seedance 2.0 · Kling · Veo · HappyHorse 等 | [访问 →](https://api-aimodels.com) |
+| [<img src="https://r2.api-models.com/logo-dark-icon.png" alt="API AI Models" width="24" valign="middle"> **API AI Models**](https://api-aimodels.com/register?aff=DrSm) | 400+ 模型聚合 · 多渠道切换 · 价格透明 · 稳定可靠 | 文本 / 图像 / 视频 / 音乐全系列 · Claude 官方 · AWSB · CCMax · Kiro · Seedance 2.0 · Kling · Veo · HappyHorse 等 | [访问 →](https://api-aimodels.com/register?aff=DrSm) |
 
 ## 友链
 
