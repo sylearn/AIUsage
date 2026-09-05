@@ -1,10 +1,11 @@
 import Darwin
 import Foundation
+import SQLite3
 
 /// 把旧版 AIUsage 会话固定下来的自定义 provider 改为 Codex 内置 `openai`。
 ///
-/// 迁移只原位覆盖 `session_meta.payload.model_provider` 的几个字节，并用 JSON 空白补齐长度：
-/// 文件大小与后续内容偏移均不改变，因此不会和仍在追加 JSONL 的 Codex 进程争抢整文件替换。
+/// 会话元数据只原位覆盖 `session_meta.payload.model_provider` 的几个字节，并用 JSON 空白补齐长度：
+/// 文件大小与后续内容偏移均不改变；同时精确更新 Codex 已知索引表中同名的旧 provider 引用。
 public enum CodexSessionProviderMigrator {
     public static let currentProvider = "openai"
     public static let legacyAIUsageProvider = "aiusage-proxy"
@@ -18,10 +19,12 @@ public enum CodexSessionProviderMigrator {
     public struct Report: Sendable {
         public let scannedFiles: Int
         public let migratedFiles: Int
+        public let migratedDatabaseRows: Int
 
-        public init(scannedFiles: Int, migratedFiles: Int) {
+        public init(scannedFiles: Int, migratedFiles: Int, migratedDatabaseRows: Int = 0) {
             self.scannedFiles = scannedFiles
             self.migratedFiles = migratedFiles
+            self.migratedDatabaseRows = migratedDatabaseRows
         }
     }
 
@@ -54,6 +57,7 @@ public enum CodexSessionProviderMigrator {
         case failedToWriteArchive
         case fileChanged(String)
         case failedToPatch(String)
+        case failedToMigrateIndex(String)
 
         public var errorDescription: String? {
             switch self {
@@ -67,6 +71,8 @@ public enum CodexSessionProviderMigrator {
                 return "Codex 会话文件在迁移期间发生变化：\(name)"
             case .failedToPatch(let name):
                 return "无法迁移 Codex 会话文件：\(name)"
+            case .failedToMigrateIndex(let name):
+                return "无法迁移 Codex 会话索引：\(name)"
             }
         }
     }
@@ -81,37 +87,45 @@ public enum CodexSessionProviderMigrator {
         candidates.reserveCapacity(paths.count / 8)
 
         for path in paths {
-            if let candidate = try migrationCandidate(at: path) {
-                candidates.append(candidate)
+            candidates.append(contentsOf: try migrationCandidates(at: path))
+        }
+
+        if !candidates.isEmpty {
+            var archive = try loadArchive(homeDirectory: homeDirectory)
+            let migratedAt = timestamp(Date())
+            var migratedAtBySession = archive.files.values.reduce(into: [String: String]()) { result, record in
+                if let existing = result[record.sessionID] {
+                    result[record.sessionID] = min(existing, record.migratedAt)
+                } else {
+                    result[record.sessionID] = record.migratedAt
+                }
             }
+            for candidate in candidates {
+                let recordMigratedAt = migratedAtBySession[candidate.sessionID] ?? migratedAt
+                archive.files[archiveKey(for: candidate)] = MigrationRecord(
+                    sessionID: candidate.sessionID,
+                    originalProvider: candidate.originalProvider,
+                    migratedAt: recordMigratedAt,
+                    valueOffset: candidate.valueOffset,
+                    valueLength: candidate.originalValue.count
+                )
+                migratedAtBySession[candidate.sessionID] = recordMigratedAt
+            }
+            archive.updatedAt = migratedAt
+
+            // 迁移记录先落盘：即使随后进程退出，统计仍知道该会话迁移前的真实来源。
+            try saveArchive(archive, homeDirectory: homeDirectory)
         }
 
-        guard !candidates.isEmpty else {
-            return Report(scannedFiles: paths.count, migratedFiles: 0)
-        }
-
-        var archive = try loadArchive(homeDirectory: homeDirectory)
-        let migratedAt = timestamp(Date())
-        for candidate in candidates {
-            archive.files[candidate.path] = MigrationRecord(
-                sessionID: candidate.sessionID,
-                originalProvider: candidate.originalProvider,
-                migratedAt: migratedAt,
-                valueOffset: candidate.valueOffset,
-                valueLength: candidate.originalValue.count
-            )
-        }
-        archive.updatedAt = migratedAt
-
-        // 迁移记录先落盘：即使随后进程退出，统计仍知道该会话迁移前的真实来源。
-        try saveArchive(archive, homeDirectory: homeDirectory)
-
-        var migrated = 0
         for candidate in candidates {
             try patchInPlace(candidate)
-            migrated += 1
         }
-        return Report(scannedFiles: paths.count, migratedFiles: migrated)
+        let migratedDatabaseRows = try migrateDatabaseProviderReferences(homeDirectory: homeDirectory)
+        return Report(
+            scannedFiles: paths.count,
+            migratedFiles: Set(candidates.map(\.path)).count,
+            migratedDatabaseRows: migratedDatabaseRows
+        )
     }
 
     /// 供 CodexCostProvider 使用：迁移前属于 AIUsage 代理的 token 行仍由代理归档负责，不能重复计入。
@@ -166,39 +180,81 @@ public enum CodexSessionProviderMigrator {
         return paths.sorted()
     }
 
-    private static func migrationCandidate(at path: String) throws -> Candidate? {
+    private static func migrationCandidates(at path: String) throws -> [Candidate] {
         guard let handle = FileHandle(forReadingAtPath: path) else {
             throw MigrationError.failedToRead((path as NSString).lastPathComponent)
         }
-        var firstLine = Data()
-        firstLine.reserveCapacity(16 * 1024)
+        var candidates: [Candidate] = []
+        var pending = Data()
+        pending.reserveCapacity(64 * 1024)
+        var pendingOffset: UInt64 = 0
+        var reachedHistory = false
         do {
-            while firstLine.count < maximumMetadataBytes {
-                let remaining = maximumMetadataBytes - firstLine.count
-                let chunk = try handle.read(upToCount: min(64 * 1024, remaining)) ?? Data()
-                if chunk.isEmpty { break }
-                if let newline = chunk.firstIndex(of: 0x0A) {
-                    firstLine.append(chunk[..<newline])
+            while !reachedHistory {
+                let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
+                if chunk.isEmpty {
+                    if !pending.isEmpty {
+                        try appendMigrationCandidate(
+                            from: pending,
+                            at: pendingOffset,
+                            path: path,
+                            to: &candidates,
+                            reachedHistory: &reachedHistory
+                        )
+                    }
                     break
                 }
-                firstLine.append(chunk)
+                pending.append(chunk)
+
+                while !reachedHistory, let newline = pending.firstIndex(of: 0x0A) {
+                    let line = Data(pending[..<newline])
+                    try appendMigrationCandidate(
+                        from: line,
+                        at: pendingOffset,
+                        path: path,
+                        to: &candidates,
+                        reachedHistory: &reachedHistory
+                    )
+                    let next = pending.index(after: newline)
+                    let consumed = pending.distance(from: pending.startIndex, to: next)
+                    pending.removeSubrange(pending.startIndex..<next)
+                    pendingOffset += UInt64(consumed)
+                }
+                if pending.count > maximumMetadataBytes {
+                    reachedHistory = true
+                }
             }
             try handle.close()
+        } catch let error as MigrationError {
+            try? handle.close()
+            throw error
         } catch {
             try? handle.close()
             throw MigrationError.failedToRead((path as NSString).lastPathComponent)
         }
+        return candidates
+    }
 
-        // Codex rollout 的 session_meta 是第一行。只读取这一行，避免应用启动时为每个历史
-        // rollout 吞掉最多 1 MB；超长或非标准文件保持原样，不做猜测性改写。
-        guard let parsed = parseSessionMetadata(firstLine), legacyProviders.contains(parsed.provider),
+    private static func appendMigrationCandidate(
+        from line: Data,
+        at lineOffset: UInt64,
+        path: String,
+        to candidates: inout [Candidate],
+        reachedHistory: inout Bool
+    ) throws {
+        guard line.count <= maximumMetadataBytes,
+              let parsed = parseSessionMetadata(line) else {
+            reachedHistory = true
+            return
+        }
+        guard legacyProviders.contains(parsed.provider),
               let valueRange = jsonStringValueRange(
                   fields: ["model_provider", "modelProvider"],
                   expectedValue: parsed.provider,
-                  in: firstLine
-              ) else { return nil }
+                  in: line
+              ) else { return }
 
-        let original = firstLine.subdata(in: valueRange)
+        let original = line.subdata(in: valueRange)
         let replacementText = "\"\(currentProvider)\""
         guard original.count >= replacementText.utf8.count else {
             throw MigrationError.failedToPatch((path as NSString).lastPathComponent)
@@ -206,14 +262,15 @@ public enum CodexSessionProviderMigrator {
         let replacement = Data(
             (replacementText + String(repeating: " ", count: original.count - replacementText.utf8.count)).utf8
         )
-        return Candidate(
+        let valueOffsetInLine = line.distance(from: line.startIndex, to: valueRange.lowerBound)
+        candidates.append(Candidate(
             path: path,
             sessionID: parsed.sessionID,
             originalProvider: parsed.provider,
-            valueOffset: UInt64(valueRange.lowerBound),
+            valueOffset: lineOffset + UInt64(valueOffsetInLine),
             originalValue: original,
             replacementValue: replacement
-        )
+        ))
     }
 
     private static func parseSessionMetadata(_ line: Data) -> (sessionID: String, provider: String)? {
@@ -331,7 +388,93 @@ public enum CodexSessionProviderMigrator {
         }
     }
 
+    // MARK: - Codex thread indexes
+
+    private struct DatabaseTarget: Hashable {
+        let path: String
+        let table: String
+    }
+
+    private static func migrateDatabaseProviderReferences(homeDirectory: String) throws -> Int {
+        var migrated = 0
+        for target in databaseTargets(homeDirectory: homeDirectory) {
+            migrated += try updateProvider(in: target)
+        }
+        return migrated
+    }
+
+    private static func databaseTargets(homeDirectory: String) -> [DatabaseTarget] {
+        let codexHome = URL(fileURLWithPath: homeDirectory, isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        let roots = [codexHome, codexHome.appendingPathComponent("sqlite", isDirectory: true)]
+        var targets = Set<DatabaseTarget>()
+
+        for root in roots {
+            guard let items = try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for item in items {
+                guard let values = try? item.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+                      values.isRegularFile == true,
+                      values.isSymbolicLink != true else { continue }
+                let name = item.lastPathComponent
+                if name.hasPrefix("state_"), item.pathExtension.lowercased() == "sqlite" {
+                    targets.insert(DatabaseTarget(path: item.path, table: "threads"))
+                } else if name == "codex-dev.db" {
+                    targets.insert(DatabaseTarget(path: item.path, table: "local_thread_catalog"))
+                }
+            }
+        }
+        return targets.sorted { lhs, rhs in lhs.path < rhs.path }
+    }
+
+    private static func updateProvider(in target: DatabaseTarget) throws -> Int {
+        var database: OpaquePointer?
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(target.path, &database, flags, nil) == SQLITE_OK,
+              let database else {
+            if let database { sqlite3_close(database) }
+            throw MigrationError.failedToMigrateIndex((target.path as NSString).lastPathComponent)
+        }
+        defer { sqlite3_close(database) }
+        sqlite3_busy_timeout(database, 5_000)
+
+        guard try tableHasModelProvider(target.table, database: database) else { return 0 }
+        let sql = "UPDATE \(target.table) SET model_provider = 'openai' WHERE model_provider = 'aiusage-proxy'"
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw MigrationError.failedToMigrateIndex((target.path as NSString).lastPathComponent)
+        }
+        return Int(sqlite3_changes(database))
+    }
+
+    private static func tableHasModelProvider(_ table: String, database: OpaquePointer) throws -> Bool {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA table_info(\(table))", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw MigrationError.failedToMigrateIndex(table)
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while true {
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW:
+                guard let name = sqlite3_column_text(statement, 1) else { continue }
+                if String(cString: name) == "model_provider" { return true }
+            case SQLITE_DONE:
+                return false
+            default:
+                throw MigrationError.failedToMigrateIndex(table)
+            }
+        }
+    }
+
     // MARK: - Journal
+
+    private static func archiveKey(for candidate: Candidate) -> String {
+        "\(candidate.path)#\(candidate.valueOffset)"
+    }
 
     private static func loadArchive(homeDirectory: String) throws -> MigrationArchive {
         let url = archiveURL(homeDirectory: homeDirectory)

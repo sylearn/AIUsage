@@ -12,7 +12,8 @@ let package = Package(
     targets: [
         .target(
             name: "QuotaBackend",
-            path: "Sources/QuotaBackend"
+            path: "Sources/QuotaBackend",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(
             name: "QuotaServerCore",

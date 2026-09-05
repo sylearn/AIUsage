@@ -226,8 +226,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             let report = try CodexConfigManager.shared.migrateLegacySessionsIfNeeded()
-            if report.migratedFiles > 0 {
-                appDelegateLog.info("Migrated \(report.migratedFiles, privacy: .public) legacy Codex session provider records")
+            if report.migratedFiles > 0 || report.migratedDatabaseRows > 0 {
+                appDelegateLog.info("Migrated legacy Codex provider references in \(report.migratedFiles, privacy: .public) session files and \(report.migratedDatabaseRows, privacy: .public) index rows")
             }
         } catch {
             // 激活/还原路径会再次尝试并向界面返回错误；启动本身不因单个会话文件异常而崩溃。

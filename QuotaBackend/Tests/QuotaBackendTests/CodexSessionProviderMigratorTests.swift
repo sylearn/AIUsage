@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import QuotaBackend
 
@@ -65,21 +66,120 @@ final class CodexSessionProviderMigratorTests: XCTestCase {
         XCTAssertEqual(second.migratedFiles, 0)
     }
 
-    private func writeRollout(sessionID: String, provider: String, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let metadata: [String: Any] = [
-            "timestamp": "2026-09-05T00:00:00.000Z",
-            "type": "session_meta",
-            "payload": [
-                "id": sessionID,
-                "model_provider": provider,
+    func testMigratesInheritedProviderMetadataInForkedRollout() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aiusage-fork-provider-migration-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let rolloutURL = home
+            .appendingPathComponent(".codex/sessions/2026/09/05", isDirectory: true)
+            .appendingPathComponent("fork.jsonl")
+        try FileManager.default.createDirectory(
+            at: rolloutURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        var data = try metadataData(
+            sessionID: "child-session",
+            provider: "openai",
+            parentSessionID: "parent-session"
+        )
+        data.append(0x0A)
+        data.append(try metadataData(sessionID: "parent-session", provider: "aiusage-proxy"))
+        data.append(0x0A)
+        data.append(Data("{\"type\":\"response_item\",\"payload\":{\"text\":\"keep exactly\"}}\n".utf8))
+        try data.write(to: rolloutURL, options: .atomic)
+        let originalSize = data.count
+
+        let priorCutoff = "2026-09-01T00:00:00.000Z"
+        let archiveURL = CodexSessionProviderMigrator.archiveURL(homeDirectory: home.path)
+        try FileManager.default.createDirectory(
+            at: archiveURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let existingArchive: [String: Any] = [
+            "version": 1,
+            "updatedAt": priorCutoff,
+            "files": [
+                rolloutURL.path: [
+                    "sessionID": "parent-session",
+                    "originalProvider": "aiusage-proxy",
+                    "migratedAt": priorCutoff,
+                    "valueOffset": 0,
+                    "valueLength": 15,
+                ],
             ],
         ]
-        let metadataData = try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
-        var data = metadataData
+        try JSONSerialization.data(withJSONObject: existingArchive, options: [.sortedKeys])
+            .write(to: archiveURL, options: .atomic)
+
+        let report = try CodexSessionProviderMigrator.migrate(homeDirectory: home.path)
+
+        XCTAssertEqual(report.migratedFiles, 1)
+        XCTAssertEqual(try sessionProviders(in: rolloutURL), ["openai", "openai"])
+        XCTAssertEqual(try Data(contentsOf: rolloutURL).count, originalSize)
+        let cutoffFormatter = ISO8601DateFormatter()
+        cutoffFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let expectedCutoff = try XCTUnwrap(cutoffFormatter.date(from: priorCutoff))
+        XCTAssertEqual(
+            CodexSessionProviderMigrator.legacyProxyCutoffs(homeDirectory: home.path)["parent-session"],
+            expectedCutoff
+        )
+    }
+
+    func testMigratesCodexThreadIndexDatabases() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aiusage-thread-index-migration-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let rootState = home.appendingPathComponent(".codex/state_5.sqlite")
+        let nestedState = home.appendingPathComponent(".codex/sqlite/state_4.sqlite")
+        let catalog = home.appendingPathComponent(".codex/sqlite/codex-dev.db")
+        try createIndexDatabase(at: rootState, table: "threads")
+        try createIndexDatabase(at: nestedState, table: "threads")
+        try createIndexDatabase(at: catalog, table: "local_thread_catalog")
+
+        let report = try CodexSessionProviderMigrator.migrate(homeDirectory: home.path)
+
+        XCTAssertEqual(report.migratedFiles, 0)
+        XCTAssertEqual(report.migratedDatabaseRows, 3)
+        XCTAssertEqual(try modelProviders(in: rootState, table: "threads"), ["openai", "openai", "cliproxyapi"])
+        XCTAssertEqual(try modelProviders(in: nestedState, table: "threads"), ["openai", "openai", "cliproxyapi"])
+        XCTAssertEqual(
+            try modelProviders(in: catalog, table: "local_thread_catalog"),
+            ["openai", "openai", "cliproxyapi"]
+        )
+
+        let second = try CodexSessionProviderMigrator.migrate(homeDirectory: home.path)
+        XCTAssertEqual(second.migratedDatabaseRows, 0)
+    }
+
+    private func writeRollout(sessionID: String, provider: String, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var data = try metadataData(sessionID: sessionID, provider: provider)
         data.append(0x0A)
         data.append(Data("{\"type\":\"response_item\",\"payload\":{\"text\":\"keep exactly\"}}\n".utf8))
         try data.write(to: url, options: .atomic)
+    }
+
+    private func metadataData(
+        sessionID: String,
+        provider: String,
+        parentSessionID: String? = nil
+    ) throws -> Data {
+        var payload: [String: Any] = [
+            "id": sessionID,
+            "model_provider": provider,
+        ]
+        if let parentSessionID {
+            payload["session_id"] = parentSessionID
+        }
+        let metadata: [String: Any] = [
+            "timestamp": "2026-09-05T00:00:00.000Z",
+            "type": "session_meta",
+            "payload": payload,
+        ]
+        return try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
     }
 
     private func provider(in url: URL) throws -> String {
@@ -95,5 +195,60 @@ final class CodexSessionProviderMigratorTests: XCTestCase {
     private func suffixAfterFirstLine(_ data: Data) throws -> Data {
         let newline = try XCTUnwrap(data.firstIndex(of: 0x0A))
         return data[data.index(after: newline)...]
+    }
+
+    private func sessionProviders(in url: URL) throws -> [String] {
+        try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n")
+            .compactMap { line in
+                guard let data = line.data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      object["type"] as? String == "session_meta",
+                      let payload = object["payload"] as? [String: Any] else { return nil }
+                return (payload["model_provider"] as? String) ?? (payload["modelProvider"] as? String)
+            }
+    }
+
+    private func createIndexDatabase(at url: URL, table: String) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil), SQLITE_OK)
+        let db = try XCTUnwrap(database)
+        defer { sqlite3_close(db) }
+        let sql = """
+        CREATE TABLE \(table) (id TEXT PRIMARY KEY, model_provider TEXT NOT NULL);
+        INSERT INTO \(table) VALUES ('legacy', 'aiusage-proxy');
+        INSERT INTO \(table) VALUES ('native', 'openai');
+        INSERT INTO \(table) VALUES ('foreign', 'cliproxyapi');
+        """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+    }
+
+    private func modelProviders(in url: URL, table: String) throws -> [String] {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        let db = try XCTUnwrap(database)
+        defer { sqlite3_close(db) }
+
+        var statement: OpaquePointer?
+        XCTAssertEqual(
+            sqlite3_prepare_v2(
+                db,
+                "SELECT model_provider FROM \(table) ORDER BY CASE id WHEN 'legacy' THEN 0 WHEN 'native' THEN 1 ELSE 2 END",
+                -1,
+                &statement,
+                nil
+            ),
+            SQLITE_OK
+        )
+        let query = try XCTUnwrap(statement)
+        defer { sqlite3_finalize(query) }
+        var providers: [String] = []
+        while sqlite3_step(query) == SQLITE_ROW {
+            if let value = sqlite3_column_text(query, 0) {
+                providers.append(String(cString: value))
+            }
+        }
+        return providers
     }
 }
