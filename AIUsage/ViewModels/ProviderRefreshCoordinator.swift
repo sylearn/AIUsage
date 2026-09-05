@@ -320,7 +320,10 @@ final class ProviderRefreshCoordinator: ObservableObject {
         if let live = entry.liveProvider {
             let identity = liveProviderIdentity(live)
             providers.removeAll {
-                $0.id == live.id || liveProviderIdentity($0) == identity
+                if live.baseProviderId == "codex" {
+                    return $0.baseProviderId == "codex" && AccountIdentityPolicy.codexLiveAccountsMatch($0, live)
+                }
+                return $0.id == live.id || liveProviderIdentity($0) == identity
             }
             return
         }
@@ -353,9 +356,25 @@ final class ProviderRefreshCoordinator: ObservableObject {
     ) -> [ProviderAccountEntry] {
         var remainingLive = liveProviders
         var entries: [ProviderAccountEntry] = []
+        var codexOwners: [String: String] = [:]
+        if providerId == "codex" {
+            // 与刷新协调使用同一归属规则，旧记录不能抢走原生身份完整的另一张卡片。
+            for live in liveProviders {
+                if let owner = AccountIdentityPolicy.bestStoredAccountIndex(
+                    in: storedAccounts, for: live, excluding: [], allowUnseenCredentialFallback: false
+                ) {
+                    codexOwners[live.id] = storedAccounts[owner].id
+                }
+            }
+        }
 
         for stored in storedAccounts {
-            let matches = remainingLive.filter { accountStore.matchesStoredWithLive(stored, provider: $0) }
+            let matches = remainingLive.filter { live in
+                if providerId == "codex" {
+                    return codexOwners[live.id] == stored.id
+                }
+                return accountStore.matchesStoredWithLive(stored, provider: live)
+            }
 
             if let preferredLive = preferredLiveProvider(among: matches, storedAccount: stored) {
                 let consumedIDs = Set(matches.map(\.id))

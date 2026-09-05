@@ -120,6 +120,12 @@ final class ProviderActivationManager: ObservableObject {
     func isActiveAccount(_ entry: ProviderAccountEntry) -> Bool {
         guard let activeId = activeProviderAccountIds[entry.providerId]?.lowercased() else { return false }
 
+        if entry.providerId == "codex" {
+            let identity = entry.liveProvider.map { AccountIdentityPolicy.codexIdentity(for: $0) }
+                ?? entry.storedAccount.map { AccountIdentityPolicy.codexIdentity(for: $0) }
+            return identity?.key != nil && identity?.key == activeId
+        }
+
         if AccountIdentityPolicy.isMultiWorkspace(entry.providerId) {
             let entryPath = entry.storedAccount?.sourceFilePath ?? entry.liveProvider?.sourceFilePath
             guard let entryPath else { return false }
@@ -162,6 +168,16 @@ final class ProviderActivationManager: ObservableObject {
 
         let sourceData = try Data(contentsOf: URL(fileURLWithPath: resolved))
         let nativeData = try convertToCodexNativeFormat(sourceData)
+        let nativeJSON = try JSONSerialization.jsonObject(with: nativeData) as? [String: Any] ?? [:]
+        let nativeIdentity = CodexAccountIdentity(authJSON: nativeJSON)
+        let expectedIdentity = entry.liveProvider.map { AccountIdentityPolicy.codexIdentity(for: $0) }
+            ?? entry.storedAccount.map { AccountIdentityPolicy.codexIdentity(for: $0) }
+        guard let expectedIdentity, expectedIdentity.matches(nativeIdentity) else {
+            throw ProviderError("account_mismatch", settings.t(
+                "The auth file no longer belongs to this account. Reconnect it before switching.",
+                "认证文件已不属于此账号，请重新连接后再切换。"
+            ))
+        }
 
         // 目标账号验证完成后再解除代理接管，避免坏文件让当前可用路由先被停掉。
         // 停进程走通知（异步），但文件必须在写账号之前同步归位，否则异步 restore 会覆盖新账号。
@@ -169,12 +185,7 @@ final class ProviderActivationManager: ObservableObject {
         try CodexConfigManager.shared.restore()
         try writeAuthFileWithBackup(targetDir: codexDir, targetPath: targetPath, data: nativeData, fm: fm)
 
-        let entryPath = entry.storedAccount?.sourceFilePath ?? entry.liveProvider?.sourceFilePath
-        if let entryPath {
-            activeProviderAccountIds["codex"] = AccountCredentialStore.normalizedAuthFilePath(entryPath)
-        } else {
-            activeProviderAccountIds["codex"] = accountId ?? email
-        }
+        activeProviderAccountIds["codex"] = nativeIdentity.key
         persistActiveIds()
 
         let label = email ?? accountId ?? "Codex"
@@ -363,87 +374,21 @@ final class ProviderActivationManager: ObservableObject {
 
     func detectActiveCodexAccount() {
         let authPath = NSString(string: "~/.codex/auth.json").expandingTildeInPath
-        guard FileManager.default.fileExists(atPath: authPath) else {
-            applyDetectedActiveId(nil, for: "codex", reason: "auth file missing")
+        guard let authJSON = Self.loadJSON(atPath: authPath) else {
+            applyDetectedActiveId(nil, for: "codex", reason: "auth file unavailable")
             return
         }
-
-        let codexAccounts = accountStore.accountRegistry.filter { $0.providerId == "codex" }
-        guard !codexAccounts.isEmpty else { return }
-
-        // If there's already an active Codex ID that resolves to a known registered
-        // account, keep it. This prevents the path-based heuristic below from
-        // overwriting a user's explicit in-app account switch: activateCodexAccount
-        // stores the *managed* entry path, but a naïve path match against
-        // ~/.codex/auth.json would replace it with the CLI path and highlight the
-        // wrong row.
-        if let currentId = activeProviderAccountIds["codex"] {
-            let stillValid = codexAccounts.contains { account in
-                if let path = account.sourceFilePath {
-                    return AccountCredentialStore.normalizedAuthFilePath(path) == currentId
-                }
-                let id = (account.accountId ?? account.email)?.lowercased()
-                return id != nil && id == currentId
-            }
-            if stillValid { return }
+        // 以磁盘中当前的完整身份检测，既能识别外部登录切换，也不会被同邮箱或同路径误导。
+        let identity = CodexAccountIdentity(authJSON: authJSON)
+        let matches = accountStore.accountRegistry.filter {
+            $0.providerId == "codex" && !$0.isHidden
+                && AccountIdentityPolicy.codexIdentity(for: $0).matches(identity)
         }
-
-        // No valid active ID — detect from disk.
-        // Prefer content-based matching (email from JWT / auth file).
-        let normalizedPath = AccountCredentialStore.normalizedAuthFilePath(authPath)
-
-        if let authJSON = Self.loadJSON(atPath: authPath) {
-            if let email = extractEmailFromCodexAuth(authJSON) {
-                let emailLower = email.lowercased()
-                if let matched = codexAccounts.first(where: {
-                    $0.email.lowercased() == emailLower
-                        || $0.accountId?.lowercased() == emailLower
-                }) {
-                    let matchedPath = matched.sourceFilePath.flatMap {
-                        AccountCredentialStore.normalizedAuthFilePath($0)
-                    } ?? normalizedPath
-                    applyDetectedActiveId(matchedPath, for: "codex", reason: "matched by auth file email")
-                    return
-                }
-            }
-        }
-
-        // Fallback: path-based match
-        if codexAccounts.first(where: {
-            AccountIdentityPolicy.sourceFilePathsMatch($0.sourceFilePath, authPath)
-        }) != nil {
-            applyDetectedActiveId(normalizedPath, for: "codex", reason: "matched by sourceFilePath (fallback)")
-            return
-        }
-
-        // Fallback: credential sourcePath match
-        let credentials = AccountCredentialStore.shared.loadCredentials(for: "codex")
-        if let credMatch = credentials.first(where: { cred in
-            guard cred.authMethod == .authFile else { return false }
-            let sourcePath = cred.metadata["sourcePath"]?.nilIfBlank ?? cred.credential
-            return AccountCredentialStore.normalizedAuthFilePath(sourcePath) == normalizedPath
-        }) {
-            if let storedMatch = codexAccounts.first(where: { $0.credentialId == credMatch.id }) {
-                let storedPath = storedMatch.sourceFilePath.flatMap {
-                    AccountCredentialStore.normalizedAuthFilePath($0)
-                } ?? normalizedPath
-                applyDetectedActiveId(storedPath, for: "codex", reason: "matched managed credential")
-                return
-            }
-        }
-    }
-
-    private func extractEmailFromCodexAuth(_ json: [String: Any]) -> String? {
-        if let email = (json["email"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank {
-            return email
-        }
-        if let tokens = json["tokens"] as? [String: Any] {
-            if let email = jwtEmailFromToken(tokens["id_token"] as? String) { return email }
-            if let email = jwtEmailFromToken(tokens["access_token"] as? String) { return email }
-        }
-        if let email = jwtEmailFromToken(json["id_token"] as? String) { return email }
-        if let email = jwtEmailFromToken(json["access_token"] as? String) { return email }
-        return nil
+        applyDetectedActiveId(
+            matches.isEmpty ? nil : identity.key,
+            for: "codex",
+            reason: "matched workspace and user"
+        )
     }
 
     private static func loadJSON(atPath path: String) -> [String: Any]? {

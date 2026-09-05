@@ -88,6 +88,14 @@ jobs:
         shell: bash
         run: ./scripts/run_cliproxy_updater_regression.sh
 
+      - name: Run Codex account isolation regression
+        shell: bash
+        run: bash scripts/run_account_identity_regression.sh
+
+      - name: Run global proxy cancellation regression
+        shell: bash
+        run: bash scripts/run_global_proxy_cancellation_regression.sh
+
       # Import the stable self-signed code signing certificate (issue #35).
       # Skipped automatically if the secret is absent, in which case the
       # packaging script falls back to ad-hoc signing.

@@ -66,9 +66,19 @@ final class AccountStore: ObservableObject {
             ?? credentialId.flatMap {
                 AccountCredentialStore.shared.loadCredential(providerId: providerId, credentialId: $0)
             }.flatMap(AccountIdentityPolicy.credentialAuthFilePath)
+        let incomingIdentity = CodexAccountIdentity(
+            accountId: normalizedAccountId, userId: credentialSnapshot?.workspaceUserId, email: effectiveEmail
+        )
 
         if let index = accountRegistry.firstIndex(where: {
             guard $0.providerId == providerId else { return false }
+            if providerId == "codex" {
+                let storedIdentity = AccountIdentityPolicy.codexIdentity(for: $0)
+                guard !storedIdentity.conflicts(with: incomingIdentity) else { return false }
+                if storedIdentity.matches(incomingIdentity) { return true }
+                if let credentialId, let storedId = $0.credentialId { return credentialId == storedId }
+                return AccountIdentityPolicy.sourceFilePathsMatch($0.sourceFilePath, resolvedSourcePath)
+            }
             if let credentialId, $0.credentialId == credentialId { return true }
             if let normalizedProviderResultId, $0.normalizedProviderResultId == normalizedProviderResultId { return true }
             if requiresCredentialBoundIdentity {
@@ -85,12 +95,6 @@ final class AccountStore: ObservableObject {
                    ),
                    let metaSource = cred.metadata["sourcePath"],
                    AccountIdentityPolicy.sourceFilePathsMatch($0.sourceFilePath, metaSource) {
-                    return true
-                }
-                // Re-adding a deleted Codex workspace must revive the permanent tombstone.
-                if providerId.lowercased() == "codex",
-                   let normalizedAccountId,
-                   $0.normalizedAccountId == normalizedAccountId {
                     return true
                 }
                 return false
@@ -117,7 +121,7 @@ final class AccountStore: ObservableObject {
                 isHidden: false,
                 isPermanentlyRemoved: false,
                 sourceFilePath: resolvedSourcePath ?? existing.sourceFilePath,
-                workspaceUserId: existing.workspaceUserId
+                workspaceUserId: credentialSnapshot?.workspaceUserId ?? existing.workspaceUserId
             )
         } else {
             accountRegistry.append(
@@ -134,7 +138,8 @@ final class AccountStore: ObservableObject {
                     lastSeenAt: maxTimestampString(now, credentialSnapshot?.validatedAt),
                     isHidden: false,
                     isPermanentlyRemoved: false,
-                    sourceFilePath: resolvedSourcePath
+                    sourceFilePath: resolvedSourcePath,
+                    workspaceUserId: credentialSnapshot?.workspaceUserId
                 )
             )
         }
@@ -360,6 +365,7 @@ final class AccountStore: ObservableObject {
                 updated.credentialId = nil
                 updated.providerResultId = entry.liveProvider?.id ?? updated.providerResultId
                 updated.accountId = entry.liveProvider?.accountId ?? updated.accountId
+                updated.workspaceUserId = entry.liveProvider?.workspaceUserId ?? updated.workspaceUserId
                 updated.sourceFilePath = entry.liveProvider?.sourceFilePath
                     ?? entry.storedAccount?.sourceFilePath
                     ?? updated.sourceFilePath
@@ -523,19 +529,21 @@ final class AccountStore: ObservableObject {
         providerId: String,
         normalizedEmail: String?,
         normalizedAccountId: String?,
-        sourceFilePath: String? = nil
+        sourceFilePath: String? = nil,
+        workspaceUserId: String? = nil
     ) -> Bool {
         accountRegistry.contains { stored in
             guard stored.providerId == providerId, stored.isHidden else { return false }
+            if providerId == "codex" {
+                let saved = AccountIdentityPolicy.codexIdentity(for: stored)
+                let incoming = CodexAccountIdentity(accountId: normalizedAccountId, userId: workspaceUserId, email: normalizedEmail)
+                guard !saved.conflicts(with: incoming) else { return false }
+                return saved.matches(incoming)
+                    || AccountIdentityPolicy.sourceFilePathsMatch(stored.sourceFilePath, sourceFilePath)
+            }
             if AccountIdentityPolicy.isMultiWorkspace(providerId) {
                 // Codex / Antigravity: email alone can hide the wrong workspace.
                 if AccountIdentityPolicy.sourceFilePathsMatch(stored.sourceFilePath, sourceFilePath) {
-                    return true
-                }
-                // AuthImports vs ~/.codex share accountId but not path — still one workspace.
-                if providerId.lowercased() == "codex",
-                   let normalizedAccountId,
-                   stored.normalizedAccountId == normalizedAccountId {
                     return true
                 }
                 return false

@@ -18,7 +18,7 @@ extension ProviderAuthManager {
                     id: "codex:\(canonicalPath(defaultURL.path))",
                     providerId: "codex",
                     sourceIdentifier: "file:\(canonicalPath(defaultURL.path))",
-                    sessionFingerprint: sessionFingerprint(from: json),
+                    sessionFingerprint: codexSessionFingerprint(from: json),
                     title: email ?? "Current ChatGPT login",
                     subtitle: "Current ChatGPT login",
                     detail: compactDetail(parts: [displayPath(defaultURL.path), formattedDate(modificationDate(for: defaultURL))]),

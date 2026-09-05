@@ -218,7 +218,7 @@ enum ProviderAuthManager {
             ?? stringValue(json?["email"])
         let fingerprint: String?
         if let json {
-            fingerprint = sessionFingerprint(from: json)
+            fingerprint = codexSessionFingerprint(from: json)
         } else {
             fingerprint = nil
         }
@@ -359,7 +359,11 @@ enum ProviderAuthManager {
                     ?? authFileSourceIdentifier(for: credential.credential, authMethod: credential.authMethod)
             }),
             sessionFingerprints: Set(credentials.compactMap { credential in
-                normalizedHandle(credential.metadata["sessionFingerprint"])
+                if providerId == "codex" {
+                    return CodexAccountIdentity(credential: credential).key
+                        ?? credential.metadata["sessionFingerprint"].flatMap { $0.hasPrefix("codex:") ? $0 : nil }
+                }
+                return normalizedHandle(credential.metadata["sessionFingerprint"])
             }),
             accountHandles: Set(credentials.compactMap { credential in
                 normalizedHandle(

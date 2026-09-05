@@ -21,6 +21,7 @@ extension UsageNormalizer {
         base.accountLabel = preferredAccountEmail(usage)
         base.membershipLabel = membershipBadge(from: plan)
         base.workspaceLabel = wsType
+        base.workspaceUserId = usage.extra["userId"]?.value as? String
         base.category = "quota"
         base.status = status
         base.statusLabel = statusLabel

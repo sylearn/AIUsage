@@ -39,6 +39,7 @@ extension ProviderRefreshCoordinator {
             accountLabel: s.accountLabel,
             membershipLabel: s.membershipLabel,
             workspaceLabel: s.workspaceLabel,
+            workspaceUserId: s.workspaceUserId,
             headline: Headline(eyebrow: s.headline.eyebrow, primary: s.headline.primary, secondary: s.headline.secondary, supporting: s.headline.supporting),
             metrics: s.metrics.map { Metric(label: $0.label, value: $0.value, note: $0.note) },
             windows: s.windows.map { QuotaWindow(label: $0.label, remainingPercent: $0.remainingPercent, usedPercent: $0.usedPercent, value: $0.value, note: $0.note, resetAt: $0.resetAt) },
@@ -126,6 +127,7 @@ extension ProviderRefreshCoordinator {
             accountLabel: provider.accountLabel,
             membershipLabel: provider.membershipLabel,
             workspaceLabel: provider.workspaceLabel,
+            workspaceUserId: provider.workspaceUserId,
             headline: Headline(
                 eyebrow: localizedDynamicText(provider.headline.eyebrow, language),
                 primary: localizedDynamicText(provider.headline.primary, language),

@@ -152,11 +152,26 @@ public final class AccountCredentialStore: @unchecked Sendable {
         }
     }
 
-    public func updateLastUsed(_ credential: AccountCredential) {
-        var updated = credential
+    public func updateLastUsed(_ credential: AccountCredential, codexIdentity: CodexAccountIdentity? = nil) {
+        lock.lock()
+        defer { lock.unlock() }
+        var vault = loadCredentialVaultUnsafe()
+        let key = storageKey(credential)
+        // 请求完成前账号可能已删除或重新登录；只更新当前记录，不能复活旧凭据或覆盖新 token。
+        guard var updated = vault[key] else { return }
         updated.lastUsedAt = SharedFormatters.iso8601String(from: Date())
+        if credential.providerId == "codex", let codexIdentity,
+           updated.credential == credential.credential,
+           CodexAccountIdentity(credential: updated) == CodexAccountIdentity(credential: credential) {
+            // 只在原请求仍对应当前凭据时落盘已验证的原生身份，补全旧版 ID 字段。
+            if let accountId = codexIdentity.accountId { updated.metadata["accountId"] = accountId }
+            if let userId = codexIdentity.userId { updated.metadata["workspaceUserId"] = userId }
+            if let email = codexIdentity.email { updated.metadata["accountEmail"] = email }
+        }
+        vault[key] = updated
         do {
-            try saveCredential(updated)
+            try saveCredentialVaultUnsafe(vault)
+            cachedCredentialsByStorageKey = vault
         } catch {
             credentialLog.error("Keychain write failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -610,15 +625,14 @@ public final class AccountCredentialStore: @unchecked Sendable {
             ?? credential.providerId.lowercased()
 
         if provider == "codex" {
-            if let identity = codexNativeIdentity(for: credential) {
-                return "\(provider):account:\(identity.accountId)"
-                    + ":user:\(identity.userId)"
-            }
+            let identity = CodexAccountIdentity(credential: credential)
+            if let nativeKey = identity.nativeKey { return nativeKey }
             if credential.authMethod == .authFile {
                 let accountId = normalizedIdentityComponent(credential.metadata["accountId"]) ?? "*"
                 let userId = codexUserId(for: credential) ?? "*"
                 return "\(provider):incomplete:account:\(accountId)"
                     + ":user:\(userId)"
+                    + ":email:\(identity.email ?? "*")"
                     + ":authfile:\(normalizedAuthFilePath(credential.credential))"
             }
             return "\(provider):raw:\(credential.id.lowercased())"
@@ -684,49 +698,18 @@ public final class AccountCredentialStore: @unchecked Sendable {
             return canonicalIdentityKey(for: lhs) == canonicalIdentityKey(for: rhs)
         }
 
-        let lhsAccountId = normalizedIdentityComponent(lhs.metadata["accountId"])
-        let rhsAccountId = normalizedIdentityComponent(rhs.metadata["accountId"])
-        if let lhsAccountId, let rhsAccountId, lhsAccountId != rhsAccountId {
-            return false
-        }
-
-        if knownIdentityValuesConflict(
-            codexUserId(for: lhs),
-            codexUserId(for: rhs)
-        ) {
-            return false
-        }
-
-        if let lhsNative = codexNativeIdentity(for: lhs),
-           let rhsNative = codexNativeIdentity(for: rhs) {
+        let lhsIdentity = CodexAccountIdentity(credential: lhs)
+        let rhsIdentity = CodexAccountIdentity(credential: rhs)
+        guard !lhsIdentity.conflicts(with: rhsIdentity) else { return false }
+        if let lhsNative = lhsIdentity.nativeKey, let rhsNative = rhsIdentity.nativeKey {
             return lhsNative == rhsNative
         }
 
         return authFilePathsMatch(lhs, rhs)
     }
 
-    private struct CodexNativeIdentity: Equatable {
-        let accountId: String
-        let userId: String
-    }
-
-    private static func codexNativeIdentity(
-        for credential: AccountCredential
-    ) -> CodexNativeIdentity? {
-        guard let accountId = normalizedIdentityComponent(credential.metadata["accountId"]),
-              let userId = codexUserId(for: credential) else {
-            return nil
-        }
-        return CodexNativeIdentity(
-            accountId: accountId,
-            userId: userId
-        )
-    }
-
     private static func codexUserId(for credential: AccountCredential) -> String? {
-        normalizedIdentityComponent(
-            credential.metadata["workspaceUserId"] ?? credential.metadata["userId"]
-        )
+        CodexAccountIdentity(credential: credential).userId
     }
 
     private struct AntigravityNativeIdentity: Equatable {

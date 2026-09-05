@@ -68,12 +68,14 @@ public struct AccountFetchResult: Sendable {
     public let accountLabel: String?
     public let result: Result<ProviderUsage, Error>
     public let sourceFilePath: String?
+    public let workspaceUserId: String?
 
-    public init(accountId: String, accountLabel: String?, result: Result<ProviderUsage, Error>, sourceFilePath: String? = nil) {
+    public init(accountId: String, accountLabel: String?, result: Result<ProviderUsage, Error>, sourceFilePath: String? = nil, workspaceUserId: String? = nil) {
         self.accountId = accountId
         self.accountLabel = accountLabel
         self.result = result
         self.sourceFilePath = sourceFilePath
+        self.workspaceUserId = workspaceUserId
     }
 }
 

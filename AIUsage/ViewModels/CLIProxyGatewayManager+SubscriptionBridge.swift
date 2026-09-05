@@ -3,7 +3,7 @@ import os
 import QuotaBackend
 
 // MARK: - CPA → 订阅账号桥接
-// 把 CPA auth 池中的账号添加到「订阅账号」。已存在则跳过（按 accountId / 指纹去重）。
+// 把 CPA auth 池中的账号添加到「订阅账号」。Codex 按工作区 + 用户判断是否已存在。
 // 不反向删除 CPA 副本。
 
 private let subscriptionBridgeLog = Logger(
@@ -162,6 +162,16 @@ extension CLIProxyGatewayManager {
             .filter { $0.providerId.lowercased() == providerID }
         let credentialByID = Dictionary(uniqueKeysWithValues: credentials.map { ($0.id, $0) })
 
+        if providerID == "codex" {
+            guard let path = candidate.sourcePath,
+                  let json = ProviderAuthManager.loadJSONObject(at: path) else { return false }
+            return AccountIdentityPolicy.codexSubscriptionAlreadyContains(
+                identity: CodexAccountIdentity(authJSON: json), sourcePath: path,
+                registry: registry, credentialLookup: credentialByID,
+                respectRemoval: respectPermanentRemoval
+            )
+        }
+
         let candidateEmail = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let candidateFingerprint = candidate.sessionFingerprint?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -175,13 +185,6 @@ extension CLIProxyGatewayManager {
             }) {
                 return true
             }
-            // Codex：按 workspace accountId 尊重永久删除（勿用 email / userId）。
-            if multiWorkspace, providerID == "codex", let fileAccountId,
-               registry.contains(where: {
-                   $0.isPermanentlyRemoved && $0.normalizedAccountId == fileAccountId
-               }) {
-                return true
-            }
         }
 
         for account in registry where !account.isHidden && !account.isPermanentlyRemoved {
@@ -193,14 +196,6 @@ extension CLIProxyGatewayManager {
                 .lowercased(),
                existing == fingerprint {
                 return true
-            }
-            // Codex / Antigravity：只认原生 workspace / project 身份，绝不能用邮箱合并。
-            if providerID == "codex" {
-                if let fileAccountId, let accountId = account.normalizedAccountId,
-                   fileAccountId == accountId {
-                    return true
-                }
-                continue
             }
             if providerID == "antigravity" {
                 if let fileProjectId,

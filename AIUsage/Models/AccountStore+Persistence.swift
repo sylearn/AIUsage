@@ -18,7 +18,7 @@ internal let accountPersistenceLog = Logger(subsystem: "com.aiusage.desktop", ca
 /// All matching and dedup logic lives here so the `AccountRegistryRefreshSnapshot`
 /// (reconcile worker) and `AccountStore` extensions can share exactly one
 /// implementation — the two used to be hand-kept in sync and were drifting.
-enum AccountIdentityPolicy {
+nonisolated enum AccountIdentityPolicy {
     /// Delegates to the QuotaBackend definition so the credential store,
     /// provider engine, and app-side policy all agree on which providers
     /// are multi-workspace without three copies drifting out of sync.
@@ -60,12 +60,80 @@ enum AccountIdentityPolicy {
         return a == b
     }
 
-    /// Auth-file credentials store the original path in `sourcePath`; fall back to
-    /// the credential payload itself (never `sourceIdentifier`, which is a scheme URI).
+    /// Codex 绑定实际托管副本；原始 sourcePath 是可切换账号的共享入口，不能作为绑定身份。
+    /// 其他 Provider 保持原有路径策略。
     static func credentialAuthFilePath(_ credential: AccountCredential) -> String? {
         guard credential.authMethod == .authFile else { return nil }
+        if credential.providerId == "codex" { return credential.credential.nilIfBlank }
         return credential.metadata["sourcePath"]?.nilIfBlank
             ?? credential.credential.nilIfBlank
+    }
+
+    static func codexIdentity(for provider: ProviderData) -> CodexAccountIdentity {
+        CodexAccountIdentity(accountId: provider.accountId, userId: provider.workspaceUserId, email: provider.accountLabel)
+    }
+
+    static func codexIdentity(
+        for account: StoredProviderAccount,
+        credentialLookup: [String: AccountCredential] = [:]
+    ) -> CodexAccountIdentity {
+        CodexAccountIdentity(
+            accountId: account.accountId,
+            userId: resolvedCodexUserId(for: account, credentialLookup: credentialLookup),
+            email: account.email
+        )
+    }
+
+    static func codexAccountsMatch(_ lhs: StoredProviderAccount, _ rhs: StoredProviderAccount) -> Bool {
+        let left = codexIdentity(for: lhs)
+        let right = codexIdentity(for: rhs)
+        guard !left.conflicts(with: right) else { return false }
+        if left.matches(right) { return true }
+        if let lhsId = lhs.credentialId, let rhsId = rhs.credentialId { return lhsId == rhsId }
+        return sourceFilePathsMatch(lhs.sourceFilePath, rhs.sourceFilePath)
+    }
+
+    static func liveIdentityKey(for provider: ProviderData) -> String {
+        let pid = provider.baseProviderId
+        if pid == "codex" {
+            let fallback = extractCredentialId(from: provider.id).map { "cred:\($0.lowercased())" }
+                ?? normalizedSourceFilePath(provider.sourceFilePath).map { "path:\($0)" }
+                ?? "result:\(provider.id.lowercased())"
+            return codexIdentity(for: provider).key(fallback: fallback)
+        }
+        if isMultiWorkspace(pid) {
+            return normalizedSourceFilePath(provider.sourceFilePath).map { "\(pid):path:\($0)" }
+                ?? "\(pid):result:\(provider.id.lowercased())"
+        }
+        if let accountId = normalizedLiveAccountID(for: provider) { return "\(pid):id:\(accountId)" }
+        if let label = normalizedAccountIdentifier(for: provider) { return "\(pid):label:\(label)" }
+        return "\(pid):result:\(provider.id.lowercased())"
+    }
+
+    static func codexLiveAccountsMatch(_ lhs: ProviderData, _ rhs: ProviderData) -> Bool {
+        let left = codexIdentity(for: lhs)
+        let right = codexIdentity(for: rhs)
+        guard !left.conflicts(with: right) else { return false }
+        if left.matches(right) { return true }
+        if let lhsId = extractCredentialId(from: lhs.id), let rhsId = extractCredentialId(from: rhs.id) {
+            return lhsId == rhsId
+        }
+        return lhs.id == rhs.id || sourceFilePathsMatch(lhs.sourceFilePath, rhs.sourceFilePath)
+    }
+
+    static func codexSubscriptionAlreadyContains(
+        identity: CodexAccountIdentity,
+        sourcePath: String?,
+        registry: [StoredProviderAccount],
+        credentialLookup: [String: AccountCredential],
+        respectRemoval: Bool
+    ) -> Bool {
+        registry.contains { account in
+            guard account.providerId == "codex", respectRemoval || !account.isHidden else { return false }
+            let existing = codexIdentity(for: account, credentialLookup: credentialLookup)
+            guard !existing.conflicts(with: identity) else { return false }
+            return existing.matches(identity) || sourceFilePathsMatch(account.sourceFilePath, sourcePath)
+        }
     }
 
     static func maxTimestampString(_ values: String?...) -> String? {
@@ -86,15 +154,10 @@ enum AccountIdentityPolicy {
         let providerId = account.providerId.lowercased()
         if isMultiWorkspace(providerId) {
             if providerId == "codex" {
-                if let accountId = account.normalizedAccountId {
-                    let userId = resolvedCodexUserId(for: account, credentialLookup: credentialLookup)
-                    if let userId {
-                        return "\(providerId):account:\(accountId):user:\(userId)"
-                    }
-                    if !account.normalizedEmail.isEmpty {
-                        return "\(providerId):account:\(accountId):email:\(account.normalizedEmail)"
-                    }
-                }
+                let fallback = account.credentialId.map { "cred:\($0.lowercased())" }
+                    ?? normalizedSourceFilePath(account.sourceFilePath).map { "path:\($0)" }
+                    ?? "stored:\(account.id.lowercased())"
+                return codexIdentity(for: account, credentialLookup: credentialLookup).key(fallback: fallback)
             }
 
             // Path next (same as ProviderEngine fallback): scan + credential branches.
@@ -222,15 +285,21 @@ enum AccountIdentityPolicy {
         if merged.workspaceUserId?.nilIfBlank == nil {
             merged.workspaceUserId = secondary.workspaceUserId?.nilIfBlank
         }
-        // Prefer the live CLI auth path over AuthImports managed copies.
-        if let preferredPath = preferredCanonicalAuthPath(
+        // Codex 优先保留已绑定凭据的副本路径，不能再把共享 CLI 路径提升为身份锚点。
+        if merged.providerId == "codex",
+           let credential = merged.credentialId.flatMap({ credentialLookup[$0] }),
+           let path = credentialAuthFilePath(credential) {
+            merged.sourceFilePath = path
+        } else if let preferredPath = preferredCanonicalAuthPath(
             merged.sourceFilePath,
             secondary.sourceFilePath
         ) {
             merged.sourceFilePath = preferredPath
         }
         merged.lastSeenAt = maxTimestampString(preferred.lastSeenAt, secondary.lastSeenAt)
-        merged.isPermanentlyRemoved = preferred.isPermanentlyRemoved || secondary.isPermanentlyRemoved
+        merged.isPermanentlyRemoved = preferred.providerId == "codex"
+            ? preferred.isPermanentlyRemoved
+            : preferred.isPermanentlyRemoved || secondary.isPermanentlyRemoved
         merged.isHidden = (preferred.isHidden && secondary.isHidden) || merged.isPermanentlyRemoved
         if merged.isPermanentlyRemoved {
             merged.credentialId = nil
@@ -260,6 +329,17 @@ enum AccountIdentityPolicy {
     static func matchesLive(stored: StoredProviderAccount, provider: ProviderData) -> Bool {
         guard stored.providerId == provider.baseProviderId else { return false }
 
+        if stored.providerId == "codex" {
+            let saved = codexIdentity(for: stored)
+            let live = codexIdentity(for: provider)
+            guard !saved.conflicts(with: live) else { return false }
+            if saved.matches(live) { return true }
+            if let savedId = stored.credentialId, let liveId = extractCredentialId(from: provider.id) {
+                return savedId == liveId
+            }
+            return sourceFilePathsMatch(stored.sourceFilePath, provider.sourceFilePath)
+        }
+
         if let credentialId = stored.credentialId?.nilIfBlank {
             let expectedId = "\(stored.providerId):cred:\(credentialId)"
             if provider.id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -269,14 +349,6 @@ enum AccountIdentityPolicy {
         }
 
         if isMultiWorkspace(stored.providerId) {
-            // Codex workspace identity is chatgpt_account_id. Same email with
-            // different accountIds (personal vs Business) stay separate.
-            if stored.providerId.lowercased() == "codex",
-               let storedAccountId = stored.normalizedAccountId,
-               let liveAccountId = normalizedLiveAccountID(for: provider),
-               storedAccountId == liveAccountId {
-                return true
-            }
             if sourceFilePathsMatch(stored.sourceFilePath, provider.sourceFilePath) {
                 return true
             }
@@ -317,6 +389,25 @@ enum AccountIdentityPolicy {
         excluding reservedStoredIDs: Set<String>,
         allowUnseenCredentialFallback: Bool
     ) -> Int? {
+        if provider.baseProviderId == "codex" {
+            let candidates = registry.indices.filter {
+                !registry[$0].isHidden && matchesLive(stored: registry[$0], provider: provider)
+            }
+            let match: Int?
+            if let credentialId = extractCredentialId(from: provider.id),
+               let exact = candidates.first(where: { registry[$0].credentialId == credentialId }) {
+                match = exact
+            } else if let nativeKey = codexIdentity(for: provider).nativeKey,
+               let exact = candidates.first(where: { codexIdentity(for: registry[$0]).nativeKey == nativeKey }) {
+                match = exact
+            } else {
+                // 旧数据缺用户 ID 时，不能从多个同邮箱成员中随便选第一个。
+                match = candidates.count == 1 ? candidates[0] : nil
+            }
+            // 已消费的精确匹配应走重复结果分支，不能退到另一个含糊候选。
+            guard let match, !reservedStoredIDs.contains(registry[match].id) else { return nil }
+            return match
+        }
         // Step 0: credentialId — 最精确，不受 accountId 格式影响
         if let liveCredentialId = extractCredentialId(from: provider.id) {
             if let credMatch = registry.firstIndex(where: {
@@ -328,18 +419,7 @@ enum AccountIdentityPolicy {
             }
         }
 
-        // Step 0.5: Codex native workspace id (chatgpt_account_id)
         let liveIsMultiWs = isMultiWorkspace(provider.baseProviderId)
-        if liveIsMultiWs, provider.baseProviderId.lowercased() == "codex",
-           let liveAccountId = normalizedLiveAccountID(for: provider) {
-            if let nativeMatch = registry.firstIndex(where: {
-                !reservedStoredIDs.contains($0.id) && !$0.isHidden &&
-                $0.providerId == provider.baseProviderId &&
-                $0.normalizedAccountId == liveAccountId
-            }) {
-                return nativeMatch
-            }
-        }
 
         // Step 0.6: sourceFilePath 归一化路径匹配（仅 multi-workspace provider）
         if liveIsMultiWs {
@@ -397,7 +477,10 @@ enum AccountIdentityPolicy {
         candidates: [AccountCredential]
     ) -> AccountCredential? {
         if let credId = account.providerResultId.flatMap(extractCredentialId),
-           let directMatch = candidates.first(where: { $0.id == credId }) {
+           let directMatch = candidates.first(where: {
+               $0.id == credId && (account.providerId != "codex"
+                   || !codexIdentity(for: account).conflicts(with: CodexAccountIdentity(credential: $0)))
+           }) {
             return directMatch
         }
 
@@ -512,7 +595,8 @@ actor AccountRegistryRefreshWorker {
             allCredentials: allCredentials
         )
         let didChange = snapshot.reconcile(with: providers)
-        return AccountRegistryReconcileResult(accounts: snapshot.accountRegistry, didChange: didChange)
+        return AccountRegistryReconcileResult(accounts: snapshot.accountRegistry,
+                                             didChange: didChange || snapshot.accountRegistry != currentRegistry)
     }
 
     func schedulePersist(_ accounts: [StoredProviderAccount], revision: UInt64) async {
@@ -558,6 +642,16 @@ private struct AccountRegistryRefreshSnapshot {
         self.providerCatalogOrder = providerCatalogOrder
         self.credentialLookup = Dictionary(uniqueKeysWithValues: allCredentials.map { ($0.id, $0) })
         self.credentialsByProvider = Dictionary(grouping: allCredentials, by: \.providerId)
+        // 已验证凭据是绑定记录的事实来源。先补齐旧版 ID，再匹配本轮结果，避免生成重复卡片。
+        for index in self.accountRegistry.indices {
+            let account = self.accountRegistry[index]
+            guard account.providerId == "codex", !account.isHidden,
+                  let id = account.credentialId, let credential = credentialLookup[id],
+                  credential.providerId == "codex" else { continue }
+            let identity = CodexAccountIdentity(credential: credential)
+            if let accountId = identity.accountId { self.accountRegistry[index].accountId = accountId }
+            if let userId = identity.userId { self.accountRegistry[index].workspaceUserId = userId }
+        }
     }
 
     nonisolated mutating func reconcile(with providers: [ProviderData]) -> Bool {
@@ -583,7 +677,10 @@ private struct AccountRegistryRefreshSnapshot {
                 continue
             }
 
-            let inferredCredentialId = AccountIdentityPolicy.extractCredentialId(from: provider.id)
+            let inferredCredentialId = AccountIdentityPolicy.extractCredentialId(from: provider.id).flatMap { id in
+                // 删除前已发出的请求可能稍后返回；失效凭据不能借刷新结果复活删除记录。
+                provider.baseProviderId != "codex" || credentialLookup[id] != nil ? id : nil
+            }
 
             if let hiddenIndex = accountRegistry.firstIndex(where: {
                 !$0.id.isEmpty && !reservedStoredIDs.contains($0.id) && $0.isHidden &&
@@ -604,6 +701,7 @@ private struct AccountRegistryRefreshSnapshot {
                     if isLiveSuccess, hidden.accountId != provider.accountId {
                         hidden.accountId = provider.accountId
                     }
+                    if let userId = provider.workspaceUserId { hidden.workspaceUserId = userId }
                     if let livePath = provider.sourceFilePath,
                        !AccountIdentityPolicy.sourceFilePathsMatch(hidden.sourceFilePath, livePath) {
                         hidden.sourceFilePath = livePath
@@ -624,7 +722,11 @@ private struct AccountRegistryRefreshSnapshot {
                     hidden.accountId = provider.accountId
                     didChange = true
                 }
-                if hidden.credentialId == nil, let inferredCredentialId, !hidden.isPermanentlyRemoved {
+                if let userId = provider.workspaceUserId, hidden.workspaceUserId != userId {
+                    hidden.workspaceUserId = userId
+                    didChange = true
+                }
+                if hidden.providerId != "codex", hidden.credentialId == nil, let inferredCredentialId, !hidden.isPermanentlyRemoved {
                     hidden.credentialId = inferredCredentialId
                     didChange = true
                 }
@@ -658,6 +760,10 @@ private struct AccountRegistryRefreshSnapshot {
                     updated.accountId = provider.accountId
                     didChange = true
                 }
+                if let userId = provider.workspaceUserId, updated.workspaceUserId != userId {
+                    updated.workspaceUserId = userId
+                    didChange = true
+                }
                 if updated.providerResultId != provider.id {
                     updated.providerResultId = provider.id
                     didChange = true
@@ -685,7 +791,14 @@ private struct AccountRegistryRefreshSnapshot {
                 let normalizedNewEmail = label.lowercased()
                 let normalizedNewAccountId = AccountIdentityPolicy.normalizedLookupValue(provider.accountId)
                 let isMultiWs = AccountIdentityPolicy.isMultiWorkspace(provider.baseProviderId)
-                if let dupeIndex = accountRegistry.firstIndex(where: {
+                let dupeIndex = provider.baseProviderId == "codex"
+                    ? AccountIdentityPolicy.bestStoredAccountIndex(
+                        in: accountRegistry,
+                        for: provider,
+                        excluding: [],
+                        allowUnseenCredentialFallback: false
+                    )
+                    : accountRegistry.firstIndex(where: {
                     guard $0.providerId == provider.baseProviderId, !$0.isHidden else { return false }
                     if isMultiWs {
                         if let inferredCredentialId {
@@ -701,7 +814,8 @@ private struct AccountRegistryRefreshSnapshot {
                         return false
                     }
                     return $0.normalizedEmail == normalizedNewEmail
-                }) {
+                })
+                if let dupeIndex {
                     var existing = accountRegistry[dupeIndex]
                     if existing.providerResultId != provider.id {
                         existing.providerResultId = provider.id
@@ -709,6 +823,10 @@ private struct AccountRegistryRefreshSnapshot {
                     }
                     if provider.status != .error, existing.accountId != provider.accountId {
                         existing.accountId = provider.accountId
+                        didChange = true
+                    }
+                    if let userId = provider.workspaceUserId, existing.workspaceUserId != userId {
+                        existing.workspaceUserId = userId
                         didChange = true
                     }
                     if existing.credentialId == nil, let inferredCredentialId {
@@ -739,7 +857,8 @@ private struct AccountRegistryRefreshSnapshot {
                         createdAt: now,
                         lastSeenAt: now,
                         isHidden: false,
-                        sourceFilePath: provider.sourceFilePath
+                        sourceFilePath: provider.sourceFilePath,
+                        workspaceUserId: provider.workspaceUserId
                     )
                     accountRegistry.append(stored)
                     reservedStoredIDs.insert(stored.id)
@@ -963,6 +1082,7 @@ extension AccountStore {
         let displayName: String?
         let accountId: String?
         let validatedAt: String?
+        let workspaceUserId: String?
 
         var normalizedAccountId: String? {
             accountId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().nilIfBlank
@@ -982,7 +1102,8 @@ extension AccountStore {
             displayName: credential.metadata["displayName"]?.nilIfBlank,
             accountId: credential.metadata["accountId"]?.nilIfBlank,
             validatedAt: credential.metadata["lastValidatedAt"]?.nilIfBlank
-                ?? credential.lastUsedAt?.nilIfBlank
+                ?? credential.lastUsedAt?.nilIfBlank,
+            workspaceUserId: CodexAccountIdentity(credential: credential).userId
         )
     }
 
@@ -995,6 +1116,8 @@ extension AccountStore {
 
         for index in accountRegistry.indices {
             var account = accountRegistry[index]
+            // 隐藏/删除记录保留身份，但不能通过旧 providerResultId 自动重新绑定凭据。
+            if account.providerId == "codex", account.isHidden { continue }
             var resolvedCredentialId = account.credentialId?.nilIfBlank
 
             if resolvedCredentialId == nil,
@@ -1105,7 +1228,7 @@ extension AccountStore {
         values
             .compactMap { $0?.nilIfBlank }
             .max {
-                (parseISO8601($0) ?? .distantPast) < (parseISO8601($1) ?? .distantPast)
+                (SharedFormatters.parseISO8601($0) ?? .distantPast) < (SharedFormatters.parseISO8601($1) ?? .distantPast)
             }
     }
 

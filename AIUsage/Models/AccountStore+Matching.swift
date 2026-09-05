@@ -62,6 +62,7 @@ extension AccountStore {
         }
 
         if AccountIdentityPolicy.isMultiWorkspace(entry.providerId) {
+            if entry.providerId == "codex" { return nil }
             let livePath = entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
             guard let livePath else { return nil }
             return accountRegistry.firstIndex(where: {
@@ -115,11 +116,29 @@ extension AccountStore {
             lastSeenAt: lastSeenAt ?? entry.storedAccount?.lastSeenAt,
             isHidden: isHidden || isPermanentlyRemoved,
             isPermanentlyRemoved: isPermanentlyRemoved,
-            sourceFilePath: entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
+            sourceFilePath: entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath,
+            workspaceUserId: entry.liveProvider?.workspaceUserId ?? entry.storedAccount?.workspaceUserId
         )
     }
 
     func matchingCredentialsImpl(for entry: ProviderAccountEntry) -> [AccountCredential] {
+        if entry.providerId == "codex" {
+            let identity = entry.liveProvider.map(AccountIdentityPolicy.codexIdentity(for:))
+                ?? entry.storedAccount.map { AccountIdentityPolicy.codexIdentity(for: $0) }
+                ?? CodexAccountIdentity(accountId: nil, userId: nil)
+            let boundId = entry.storedAccount?.credentialId
+                ?? entry.liveProvider.flatMap { AccountIdentityPolicy.extractCredentialId(from: $0.id) }
+            let path = entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
+            return AccountCredentialStore.shared.loadCredentials(for: "codex").filter { credential in
+                let candidate = CodexAccountIdentity(credential: credential)
+                guard !identity.conflicts(with: candidate) else { return false }
+                if identity.matches(candidate) { return true }
+                if let boundId { return credential.id == boundId }
+                return AccountIdentityPolicy.sourceFilePathsMatch(
+                    AccountIdentityPolicy.credentialAuthFilePath(credential), path
+                )
+            }
+        }
         if let credentialId = entry.storedAccount?.credentialId?.nilIfBlank,
            let directMatch = AccountCredentialStore.shared.loadCredential(
             providerId: entry.providerId,
@@ -140,8 +159,7 @@ extension AccountStore {
 
         let credentials = AccountCredentialStore.shared.loadCredentials(for: entry.providerId)
 
-        // Codex / Antigravity: never match by email alone (same inbox, different workspaces).
-        // Prefer auth-file path, then Codex accountId metadata.
+        // Antigravity 保留路径回退；Codex 已在上方完成原生身份核对。
         if AccountIdentityPolicy.isMultiWorkspace(entry.providerId) {
             let livePath = entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
             if let livePath {
@@ -153,17 +171,6 @@ extension AccountStore {
                 }
                 if !pathMatches.isEmpty {
                     return pathMatches
-                }
-            }
-
-            if entry.providerId.lowercased() == "codex",
-               let accountId = (
-                entry.liveProvider?.accountId ?? entry.storedAccount?.accountId
-               )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().nilIfBlank {
-                return credentials.filter { credential in
-                    credential.metadata["accountId"]?
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .lowercased() == accountId
                 }
             }
 
@@ -199,6 +206,14 @@ extension AccountStore {
         }
 
         if AccountIdentityPolicy.isMultiWorkspace(entry.providerId) {
+            if entry.providerId == "codex" {
+                if let account = entry.storedAccount {
+                    for (index, stored) in accountRegistry.enumerated() where stored.providerId == "codex" {
+                        if AccountIdentityPolicy.codexAccountsMatch(stored, account) { indices.insert(index) }
+                    }
+                }
+                return indices.sorted()
+            }
             let livePath = entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
             if let livePath {
                 for (index, stored) in accountRegistry.enumerated() where stored.providerId == entry.providerId {

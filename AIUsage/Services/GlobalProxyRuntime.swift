@@ -298,6 +298,7 @@ final class GlobalProxyRuntime: ObservableObject {
     /// （OpenCode 按接口复用 codex/claude/opencode 三个 admin 路由，故 adminPath 由调用方下发；
     /// 缺省回退到本实例固定路径，兼容 Codex/Claude 单一路由）。
     func switchUpstream(payload: [String: Any], adminPath overridePath: String? = nil, nodeId: String, nodeName: String) async throws {
+        try Task.checkCancellation()
         guard isProcessRunning, let adminKey else {
             throw GlobalProxyRuntimeError.notRunning
         }
@@ -316,6 +317,10 @@ final class GlobalProxyRuntime: ObservableObject {
         do {
             (_, response) = try await URLSession.shared.data(for: request)
         } catch {
+            // URLSession 将任务取消桥接成 URLError.cancelled；保留取消语义，不能报网络故障。
+            if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                throw CancellationError()
+            }
             throw GlobalProxyRuntimeError.adminUnreachable(error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse else {

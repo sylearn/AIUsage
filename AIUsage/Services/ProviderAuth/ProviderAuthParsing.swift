@@ -239,6 +239,12 @@ extension ProviderAuthManager {
         return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
+    static func codexSessionFingerprint(from json: [String: Any]) -> String? {
+        if let key = CodexAccountIdentity(authJSON: json).key { return key }
+        guard let data = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]) else { return nil }
+        return "codex:raw:\(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined())"
+    }
+
     static func deduplicated(_ candidates: [ProviderAuthCandidate]) -> [ProviderAuthCandidate] {
         var seen = Set<String>()
         return candidates.filter { candidate in
@@ -248,6 +254,11 @@ extension ProviderAuthManager {
     }
 
     static func isCandidateManaged(_ candidate: ProviderAuthCandidate, monitored: ProviderMonitoredSessionIndex) -> Bool {
+        if candidate.providerId == "codex" {
+            // 公共 auth 路径、旧式 workspace-only 指纹和邮箱都不能抑制另一个订阅。
+            guard let fingerprint = candidate.sessionFingerprint, fingerprint.hasPrefix("codex:") else { return false }
+            return monitored.sessionFingerprints.contains(fingerprint)
+        }
         if sourceIdentifierIsStableIdentity(for: candidate),
            monitored.sourceIdentifiers.contains(candidate.sourceIdentifier) {
             return true

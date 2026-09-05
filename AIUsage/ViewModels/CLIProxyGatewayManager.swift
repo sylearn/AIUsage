@@ -1633,6 +1633,15 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     func upsertManagedProvider(targets: Set<ProxyTarget>) async {
+        guard !Task.isCancelled else { return }
+        // 分发会同时修改持久配置和运行中上游，开始后必须完成；离开 CPA 页面只取消刷新，
+        // 不能把这段事务一起取消，留下已保存节点与实际路由不一致的状态。
+        await Task { @MainActor in
+            await self.applyManagedProvider(targets: targets)
+        }.value
+    }
+
+    private func applyManagedProvider(targets: Set<ProxyTarget>) async {
         guard runtime.state.isRunning,
               !isApplyingDistribution,
               let clientKey = runtime.managedProviderClientAPIKey else { return }

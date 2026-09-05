@@ -695,7 +695,7 @@ final class GlobalProxyManager: ObservableObject {
 
     /// 节点配置已变（例如 CPA 从 convert 切到 Anthropic 透传）时，对当前激活节点强制再推上游。
     func reapplyActiveUpstream() async {
-        guard !isBusy else { return }
+        guard !Task.isCancelled, !isBusy else { return }
         guard isRuntimeEnabled, runtime.isProcessRunning,
               let nodeId = config.activeNodeId else { return }
         isBusy = true
@@ -714,6 +714,8 @@ final class GlobalProxyManager: ObservableObject {
             if track == .desktop {
                 NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
             }
+        } catch is CancellationError {
+            // 页面/任务生命周期取消不是代理不可达，不写入卡片错误或全局弹窗。
         } catch {
             operationError = error.localizedDescription
             globalProxyManagerLog.error(

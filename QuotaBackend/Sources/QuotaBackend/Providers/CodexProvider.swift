@@ -45,6 +45,10 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         case .authFile:
             let path = NSString(string: credential.credential).expandingTildeInPath
             creds = try loadCredentials(from: path)
+            let expected = CodexAccountIdentity(credential: credential)
+            guard credentialIdentityIsCompatible(expected, with: creds) else {
+                throw ProviderError("account_mismatch", "The auth file belongs to a different Codex account. Reconnect this account.")
+            }
             source = sourceInfo(for: URL(fileURLWithPath: path), mode: "manual")
             credentialPath = path
         case .token, .apiKey:
@@ -188,14 +192,24 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             throw ProviderError("source_missing", "Original auth file not found; cannot recover.")
         }
 
-        let sourceCreds = try loadCredentials(from: expandedSource)
+        guard let sourceData = FileManager.default.contents(atPath: expandedSource) else {
+            throw ProviderError("source_missing", "Original auth file could not be read.")
+        }
+        let sourceCreds = try loadCredentials(from: expandedSource, data: sourceData)
         guard sameCodexWorkspace(staleCreds, sourceCreds) else {
             throw ProviderError("workspace_mismatch", "Source auth file is a different Codex workspace.")
         }
 
-        if let sourceData = FileManager.default.contents(atPath: expandedSource),
-           FileManager.default.contents(atPath: expandedCredential) != sourceData {
+        guard let targetData = FileManager.default.contents(atPath: expandedCredential),
+              let targetCreds = try? loadCredentials(from: expandedCredential, data: targetData),
+              canReuseCredentials(staleCreds, targetCreds) else {
+            throw ProviderError("account_mismatch", "The managed auth file changed accounts during recovery.")
+        }
+        if targetData != sourceData {
             do {
+                guard FileManager.default.contents(atPath: expandedCredential) == targetData else {
+                    throw ProviderError("account_mismatch", "The auth file changed during recovery.")
+                }
                 try sourceData.write(to: URL(fileURLWithPath: expandedCredential), options: .atomic)
             } catch {
                 codexLog.warning("Failed to sync authoritative auth to managed copy at \(expandedCredential, privacy: .private): \(error.localizedDescription)")
@@ -237,6 +251,31 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         )
     }
 
+    private func canReuseCredentials(_ lhs: Credentials, _ rhs: Credentials) -> Bool {
+        let left = CodexAccountIdentity(accountId: lhs.accountId, userId: lhs.jwtUserId, email: lhs.accountEmail)
+        let right = CodexAccountIdentity(accountId: rhs.accountId, userId: rhs.jwtUserId, email: rhs.accountEmail)
+        guard !left.conflicts(with: right) else { return false }
+        return sameCodexWorkspace(lhs, rhs)
+            || (lhs.accessToken == rhs.accessToken && lhs.refreshToken == rhs.refreshToken)
+    }
+
+    func credentialIdentityIsCompatible(_ expected: CodexAccountIdentity, with creds: Credentials) -> Bool {
+        let actual = CodexAccountIdentity(accountId: creds.accountId, userId: creds.jwtUserId, email: creds.accountEmail)
+        if !expected.conflicts(with: actual) { return true }
+        // 旧版曾把 JWT sub 当作 userId；只在工作区完全一致且 JWT 能证明旧 subject 时升级。
+        // 工作区本身冲突时不能根据同邮箱或同用户猜测，应重新连接明确的工作区。
+        let subject = (decodeJWTPayload(token: creds.idToken)?["sub"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let legacyUser = subject != nil && expected.userId == subject
+        guard expected.accountId != nil, expected.accountId == actual.accountId, legacyUser else { return false }
+        let upgraded = CodexAccountIdentity(
+            accountId: expected.accountId,
+            userId: actual.userId,
+            email: expected.email
+        )
+        return upgraded.matches(actual)
+    }
+
     public func fetchAllAccounts() async -> [AccountFetchResult] {
         let contexts: [AuthContext]
         do {
@@ -266,14 +305,16 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
                             accountId: accountId,
                             accountLabel: context.creds.accountEmail,
                             result: .success(usage),
-                            sourceFilePath: filePath
+                            sourceFilePath: filePath,
+                            workspaceUserId: context.creds.jwtUserId
                         )
                     } catch {
                         return AccountFetchResult(
                             accountId: accountId,
                             accountLabel: context.creds.accountEmail,
                             result: .failure(error),
-                            sourceFilePath: filePath
+                            sourceFilePath: filePath,
+                            workspaceUserId: context.creds.jwtUserId
                         )
                     }
                 }
@@ -289,7 +330,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
 
     // MARK: - Credentials
 
-    private struct Credentials: Sendable {
+    struct Credentials: Sendable {
         let authFile: String
         let accessToken: String
         let refreshToken: String?
@@ -358,12 +399,18 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             }
     }
 
-    private func loadCredentials(from path: String) throws -> Credentials {
+    func loadCredentials(from path: String) throws -> Credentials {
         guard FileManager.default.fileExists(atPath: path) else {
             throw ProviderError("not_logged_in", "\(path) not found. Run `codex login` and sign in with ChatGPT first.")
         }
-        guard let data = FileManager.default.contents(atPath: path),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let data = FileManager.default.contents(atPath: path) else {
+            throw ProviderError("invalid_auth_file", "\(path) could not be read.")
+        }
+        return try loadCredentials(from: path, data: data)
+    }
+
+    private func loadCredentials(from path: String, data: Data) throws -> Credentials {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ProviderError("invalid_auth_file", "\(path) could not be parsed.")
         }
 
@@ -400,16 +447,13 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             ?? stringValue(tokens["idToken"])
             ?? stringValue(json["id_token"])
             ?? stringValue(json["idToken"])
-        let accountId = stringValue(tokens["account_id"])
-            ?? stringValue(tokens["accountId"])
-            ?? stringValue(json["account_id"])
-            ?? stringValue(json["accountId"])
-            ?? decodeAccountId(fromJWT: idToken)
+        let identity = CodexAccountIdentity(authJSON: json)
+        let accountId = identity.accountId
         let accountEmail = stringValue(json["email"])
             ?? decodeEmail(fromJWT: idToken)
             ?? decodeEmail(fromJWT: accessToken)
         let jwtPlanType = decodePlanType(fromJWT: idToken) ?? decodePlanType(fromJWT: accessToken)
-        let jwtUserId = decodeUserId(fromJWT: idToken) ?? decodeUserId(fromJWT: accessToken)
+        let jwtUserId = identity.userId
 
         let lastRefresh = stringValue(json["last_refresh"]).flatMap(parseDate)
         let expiryDate = stringValue(json["expired"]).flatMap(parseDate)
@@ -456,13 +500,16 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         }
     }
 
-    private func performSerializedRefresh(
+    func performSerializedRefresh(
         _ creds: Credentials,
         fallbackRefreshToken: String,
         persistTo paths: [String]
     ) async throws -> Credentials {
         var current = creds
         if let path = paths.first, let disk = try? loadCredentials(from: path), !disk.isApiKeyMode {
+            guard canReuseCredentials(creds, disk) else {
+                throw ProviderError("account_mismatch", "The auth file now belongs to a different Codex account.")
+            }
             current = disk
             if !disk.needsRefresh {
                 return disk
@@ -471,7 +518,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         let token = current.refreshToken ?? fallbackRefreshToken
         let refreshed = try await performOAuthRefresh(current, refreshToken: token)
         for path in uniqueRefreshPaths(paths) {
-            persistRefreshedCredentials(refreshed, to: path)
+            persistRefreshedCredentials(refreshed, replacing: current, to: path)
         }
         return refreshed
     }
@@ -550,6 +597,13 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
 
         let newRefresh = stringValue(json["refresh_token"]) ?? refreshToken
         let newIdToken = stringValue(json["id_token"]) ?? creds.idToken
+        let refreshedIdentity = CodexAccountIdentity(authJSON: ["tokens": [
+            "account_id": creds.accountId ?? "", "id_token": newIdToken ?? "", "access_token": newAccess
+        ]])
+        let originalIdentity = CodexAccountIdentity(accountId: creds.accountId, userId: creds.jwtUserId, email: creds.accountEmail)
+        guard !originalIdentity.conflicts(with: refreshedIdentity) else {
+            throw ProviderError("account_mismatch", "Codex OAuth returned credentials for a different account.")
+        }
         return Credentials(
             authFile: creds.authFile,
             accessToken: newAccess,
@@ -558,17 +612,19 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             accountId: creds.accountId,
             accountEmail: creds.accountEmail,
             jwtPlanType: decodePlanType(fromJWT: newIdToken) ?? creds.jwtPlanType,
-            jwtUserId: decodeUserId(fromJWT: newIdToken) ?? creds.jwtUserId,
+            jwtUserId: refreshedIdentity.userId ?? creds.jwtUserId,
             needsRefresh: false,
             isApiKeyMode: false
         )
     }
 
-    private func persistRefreshedCredentials(_ creds: Credentials, to path: String) {
+    func persistRefreshedCredentials(_ creds: Credentials, replacing original: Credentials, to path: String) {
         guard !creds.isApiKeyMode else { return }
-        guard var json = (FileManager.default.contents(atPath: path).flatMap {
-            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
-        }) else { return }
+        // sourcePath 常是共享的 ~/.codex/auth.json；写回前核对当前内容，不能覆盖后来登录的成员。
+        guard let originalData = FileManager.default.contents(atPath: path),
+              let disk = try? loadCredentials(from: path, data: originalData), !disk.isApiKeyMode,
+              canReuseCredentials(original, disk) else { return }
+        guard var json = try? JSONSerialization.jsonObject(with: originalData) as? [String: Any] else { return }
 
         if var tokens = json["tokens"] as? [String: Any] {
             tokens["access_token"] = creds.accessToken
@@ -583,6 +639,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         json["last_refresh"] = SharedFormatters.iso8601String(from: Date())
 
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+            guard FileManager.default.contents(atPath: path) == originalData else { return }
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
     }
@@ -670,7 +727,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         }
     }
 
-    private func parseResponse(
+    func parseResponse(
         _ json: [String: Any],
         accountId: String?,
         source: SourceInfo,
@@ -684,7 +741,8 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         var usage = ProviderUsage(provider: "codex", label: "Codex")
         usage.accountEmail = stringValue(json["email"]) ?? fallbackEmail
 
-        let rawAccountId = stringValue(json["account_id"]) ?? accountId
+        // 请求使用的工作区 ID 是身份锚点；响应中的 account_id 可能是旧式用户级 ID。
+        let rawAccountId = accountId ?? stringValue(json["account_id"])
         usage.usageAccountId = rawAccountId
 
         let apiPlan = stringValue(json["plan_type"])
@@ -818,33 +876,12 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         return nil
     }
 
-    private func decodeAccountId(fromJWT token: String?) -> String? {
-        guard let payload = decodeJWTPayload(token: token) else { return nil }
-        if let auth = payload["https://api.openai.com/auth"] as? [String: Any] {
-            return stringValue(auth["chatgpt_account_id"])
-        }
-        return nil
-    }
-
     private func decodePlanType(fromJWT token: String?) -> String? {
         guard let payload = decodeJWTPayload(token: token) else { return nil }
         if let auth = payload["https://api.openai.com/auth"] as? [String: Any] {
             return stringValue(auth["chatgpt_plan_type"])
         }
         return nil
-    }
-
-    private func decodeUserId(fromJWT token: String?) -> String? {
-        guard let payload = decodeJWTPayload(token: token) else { return nil }
-        if let auth = payload["https://api.openai.com/auth"] as? [String: Any] {
-            if let chatGPTUserID = stringValue(auth["chatgpt_user_id"]) {
-                return chatGPTUserID
-            }
-            if let userID = stringValue(auth["user_id"]) {
-                return userID
-            }
-        }
-        return stringValue(payload["user_id"]) ?? stringValue(payload["sub"])
     }
 
     // MARK: - ChatGPT / Codex Plan Mapping

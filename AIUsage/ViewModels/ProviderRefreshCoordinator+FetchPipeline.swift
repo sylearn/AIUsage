@@ -119,7 +119,8 @@ extension ProviderRefreshCoordinator {
             providerId: providerId,
             normalizedEmail: normalizedEmail,
             normalizedAccountId: normalizedAccountId,
-            sourceFilePath: sourceFilePath
+            sourceFilePath: sourceFilePath,
+            workspaceUserId: usage.extra["userId"]?.value as? String
         )
     }
 
@@ -334,6 +335,12 @@ extension ProviderRefreshCoordinator {
             append(accountRefreshKey(providerId: provider.baseProviderId, storedAccountId: storedAccount.id))
         }
 
+        if provider.baseProviderId == "codex" {
+            append(accountRefreshKey(providerId: provider.baseProviderId, identity: liveProviderIdentity(provider)))
+            append(accountRefreshKey(providerId: provider.baseProviderId, providerDataId: provider.id))
+            return keys
+        }
+
         if let normalizedAccountId = normalizedAccountLookupValue(provider.accountId) {
             append(accountRefreshKey(providerId: provider.baseProviderId, identity: "account:\(normalizedAccountId)"))
         }
@@ -378,6 +385,9 @@ extension ProviderRefreshCoordinator {
 
     func providerMatchesRefresh(_ current: ProviderData, refreshed: ProviderData) -> Bool {
         guard current.baseProviderId == refreshed.baseProviderId else { return false }
+        if current.baseProviderId == "codex" {
+            return AccountIdentityPolicy.codexLiveAccountsMatch(current, refreshed)
+        }
 
         if current.id.caseInsensitiveCompare(refreshed.id) == .orderedSame {
             return true
@@ -548,26 +558,7 @@ extension ProviderRefreshCoordinator {
     }
 
     func liveProviderIdentity(_ provider: ProviderData) -> String {
-        let pid = provider.baseProviderId
-        if AccountIdentityPolicy.isMultiWorkspace(pid) {
-            // Codex: same workspace (accountId) collapses AuthImports vs ~/.codex;
-            // different workspaces keep different accountIds → separate cards.
-            if pid.lowercased() == "codex",
-               let accountId = normalizedLiveAccountID(for: provider) {
-                return "\(pid):account:\(accountId)"
-            }
-            if let path = provider.sourceFilePath?.nilIfBlank {
-                return "\(pid):path:\(AccountCredentialStore.normalizedAuthFilePath(path))"
-            }
-            return "\(pid):result:\(provider.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
-        }
-        if let accountId = normalizedLiveAccountID(for: provider) {
-            return "\(pid):id:\(accountId)"
-        }
-        if let label = normalizedAccountIdentifier(for: provider) {
-            return "\(pid):label:\(label)"
-        }
-        return "\(pid):result:\(provider.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+        AccountIdentityPolicy.liveIdentityKey(for: provider)
     }
 
     func preferredLiveProvider(

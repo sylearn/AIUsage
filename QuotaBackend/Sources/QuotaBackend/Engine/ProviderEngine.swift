@@ -109,7 +109,12 @@ public actor ProviderEngine {
                 resolvedCredentialResults.flatMap { identityKeys(for: $0, providerId: provider.id) }
             )
             let filteredAutomaticResults = (await fetchAutomaticResults(for: provider)).filter { result in
-                identityKeys(for: result, providerId: provider.id).isDisjoint(with: credentialIdentityKeys)
+                if provider.id == "codex" {
+                    return !resolvedCredentialResults.contains {
+                        ($0.ok || !result.ok) && codexResultsShareIdentity($0, result)
+                    }
+                }
+                return identityKeys(for: result, providerId: provider.id).isDisjoint(with: credentialIdentityKeys)
             }
             let merged = mergeResults(
                 automatic: filteredAutomaticResults,
@@ -216,6 +221,10 @@ public actor ProviderEngine {
             summary.providerId = provider.id
             summary.accountId = fallbackAccountId
             summary.accountLabel = label
+            if provider.id == "codex" {
+                summary.accountLabel = CodexAccountIdentity(credential: credential).email ?? label
+                summary.workspaceUserId = CodexAccountIdentity(credential: credential).userId
+            }
             summary.sourceFilePath = credentialSourceFilePath(for: credential)
 
             return ProviderResult(
@@ -252,7 +261,9 @@ public actor ProviderEngine {
         uniqueId: String,
         label: String?
     ) -> ProviderResult {
-        AccountCredentialStore.shared.updateLastUsed(credential)
+        AccountCredentialStore.shared.updateLastUsed(credential, codexIdentity: provider.id == "codex"
+            ? CodexAccountIdentity(accountId: usage.usageAccountId, userId: usage.extra["userId"]?.value as? String, email: usage.accountEmail)
+            : nil)
 
         var summary = UsageNormalizer.normalize(provider: provider, usage: usage)
         summary.id = uniqueId
@@ -346,6 +357,8 @@ public actor ProviderEngine {
     /// mergeResults dedupe them. Returns nil for non-authFile credentials.
     private func credentialSourceFilePath(for credential: AccountCredential) -> String? {
         guard credential.authMethod == .authFile else { return nil }
+        // Codex 原始路径可被后续登录复用；监控绑定实际托管副本，不绑定共享入口。
+        if credential.providerId == "codex" { return credential.credential.nilIfBlank }
         if let original = credential.metadata["sourcePath"]?.nilIfBlank {
             return original
         }
@@ -404,6 +417,7 @@ public actor ProviderEngine {
                 summary.providerId = provider.id
                 summary.accountId = acctId
                 summary.sourceFilePath = fetchResult.sourceFilePath
+                summary.workspaceUserId = fetchResult.workspaceUserId
                 if let label = fetchResult.accountLabel {
                     summary.accountLabel = label
                 }
@@ -431,7 +445,7 @@ public actor ProviderEngine {
         return deduplicated
     }
 
-    private func mergeResults(
+    func mergeResults(
         automatic: [ProviderResult],
         credentialBacked: [ProviderResult],
         provider: any ProviderFetcher
@@ -461,6 +475,8 @@ public actor ProviderEngine {
         return orderedKeys.compactMap { key -> ProviderResult? in
             guard let result = mergedByKey[key] else { return nil }
             if result.ok { return result }
+            // 另一个成员仍正常，不代表这个成员的失败凭据可以从列表消失。
+            if provider.id == "codex" { return result }
             guard result.id.contains(":cred:"), !autoIdentityKeys.isEmpty else { return result }
             let credKey = identityKey(for: result, providerId: provider.id)
             if autoIdentityKeys.contains(credKey) { return result }
@@ -481,20 +497,6 @@ public actor ProviderEngine {
         if let credentialId = extractCredentialId(from: result.id) {
             keys.insert("\(providerId):cred:\(credentialId)")
         }
-        if providerId.lowercased() == "codex" {
-            let accountId = normalizedIdentity(result.resultAccountId)
-                ?? normalizedIdentity(result.summary?.accountId)
-                ?? normalizedIdentity(result.usage?.usageAccountId)
-            let userId = normalizedIdentity(result.usage?.extra["userId"]?.value as? String)
-            let email = normalizedIdentity(result.usage?.accountEmail)
-                ?? normalizedIdentity(result.summary?.accountLabel)
-            if let accountId, let userId {
-                keys.insert("\(providerId):account:\(accountId):user:\(userId)")
-            }
-            if let accountId, let email {
-                keys.insert("\(providerId):account:\(accountId):email:\(email)")
-            }
-        }
         return keys
     }
 
@@ -505,18 +507,16 @@ public actor ProviderEngine {
         // when native components are incomplete.
         if AccountCredentialStore.isMultiWorkspace(providerId) {
             if providerId.lowercased() == "codex" {
-                let accountId = normalizedIdentity(result.resultAccountId)
-                    ?? normalizedIdentity(result.summary?.accountId)
-                    ?? normalizedIdentity(result.usage?.usageAccountId)
-                let userId = normalizedIdentity(result.usage?.extra["userId"]?.value as? String)
-                let email = normalizedIdentity(result.usage?.accountEmail)
-                    ?? normalizedIdentity(result.summary?.accountLabel)
-                if let accountId, let userId {
-                    return "\(providerId):account:\(accountId):user:\(userId)"
+                let identity = codexIdentity(for: result)
+                let fallback: String
+                if let credentialId = extractCredentialId(from: result.id) {
+                    fallback = "cred:\(credentialId)"
+                } else if let path = result.summary?.sourceFilePath?.nilIfBlank {
+                    fallback = "path:\(AccountCredentialStore.normalizedAuthFilePath(path))"
+                } else {
+                    fallback = "result:\(result.id)"
                 }
-                if let accountId, let email {
-                    return "\(providerId):account:\(accountId):email:\(email)"
-                }
+                return identity.key(fallback: fallback)
             }
 
             if let path = result.summary?.sourceFilePath?.nilIfBlank {
@@ -543,6 +543,27 @@ public actor ProviderEngine {
         }
 
         return "\(providerId):generic:\(result.id)"
+    }
+
+    private func codexIdentity(for result: ProviderResult) -> CodexAccountIdentity {
+        CodexAccountIdentity(
+            accountId: result.resultAccountId ?? result.summary?.accountId ?? result.usage?.usageAccountId,
+            userId: result.summary?.workspaceUserId ?? result.usage?.extra["userId"]?.value as? String,
+            email: result.usage?.accountEmail ?? result.summary?.accountLabel
+        )
+    }
+
+    func codexResultsShareIdentity(_ lhs: ProviderResult, _ rhs: ProviderResult) -> Bool {
+        let left = codexIdentity(for: lhs)
+        let right = codexIdentity(for: rhs)
+        guard !left.conflicts(with: right) else { return false }
+        if left.matches(right) { return true }
+        if let lhsCredential = extractCredentialId(from: lhs.id),
+           let rhsCredential = extractCredentialId(from: rhs.id) {
+            return lhsCredential == rhsCredential
+        }
+        guard let lhsPath = lhs.summary?.sourceFilePath, let rhsPath = rhs.summary?.sourceFilePath else { return false }
+        return AccountCredentialStore.normalizedAuthFilePath(lhsPath) == AccountCredentialStore.normalizedAuthFilePath(rhsPath)
     }
 
     private func extractCredentialId(from resultId: String) -> String? {
