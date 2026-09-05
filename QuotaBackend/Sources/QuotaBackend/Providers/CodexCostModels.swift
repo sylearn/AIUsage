@@ -30,6 +30,58 @@ struct CodexTotals: Codable, Sendable {
     var output: Int
 }
 
+struct CodexProxyTokenCoverage: Sendable {
+    var inputTokens = 0
+    var outputTokens = 0
+    var cacheReadTokens = 0
+    var cacheCreateTokens = 0
+
+    mutating func merge(_ other: Self) {
+        inputTokens += other.inputTokens
+        outputTokens += other.outputTokens
+        cacheReadTokens += other.cacheReadTokens
+        cacheCreateTokens += other.cacheCreateTokens
+    }
+}
+
+/// 实际经过 AIUsage 网关的 Codex token 覆盖，以及旧 provider 会话迁移的统计分界。
+struct CodexProxyRoutingSnapshot: Sendable {
+    typealias Models = [String: CodexProxyTokenCoverage]
+    typealias Days = [String: Models]
+
+    var sessions: [String: Days] = [:]
+    var legacyProxyCutoffs: [String: Date] = [:]
+
+    func coverage(for sessionID: String?) -> Days {
+        guard let sessionID else { return [:] }
+        return sessions[sessionID] ?? [:]
+    }
+
+    func isLegacyProxyRow(sessionID: String?, timestamp: Date) -> Bool {
+        guard let sessionID, let cutoff = legacyProxyCutoffs[sessionID] else { return false }
+        return timestamp <= cutoff
+    }
+
+    /// 文件扫描缓存必须随该会话的代理覆盖变化而失效，否则刚写入的路由凭据不会参与去重。
+    func signature(for sessionID: String?) -> String {
+        guard let sessionID else { return "no-session" }
+        var parts = ["routing-v1"]
+        if let cutoff = legacyProxyCutoffs[sessionID] {
+            parts.append("legacy:\(cutoff.timeIntervalSince1970)")
+        }
+        for day in (sessions[sessionID] ?? [:]).keys.sorted() {
+            parts.append(day)
+            for model in (sessions[sessionID]?[day] ?? [:]).keys.sorted() {
+                guard let value = sessions[sessionID]?[day]?[model] else { continue }
+                parts.append(
+                    "\(model):\(value.inputTokens):\(value.cacheReadTokens):\(value.cacheCreateTokens):\(value.outputTokens)"
+                )
+            }
+        }
+        return parts.joined(separator: "|")
+    }
+}
+
 struct TimestampedTotals: Codable, Sendable {
     let timestamp: String
     let date: Date?

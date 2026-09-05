@@ -605,7 +605,7 @@ class NodeProfileStore: ObservableObject {
     /// 为 Codex 节点导出一个独立的 CODEX_HOME 目录（内含 `config.toml`），供 `CODEX_HOME=<dir> codex` 启动。
     /// 与 Claude 的 `exportCleanSettings` 对称：不改用户真实 `~/.codex/config.toml`。
     /// 成功返回**目录**路径（CODEX_HOME 指向目录而非文件），失败返回 nil。
-    /// config.toml 含 `experimental_bearer_token`，写入后限制为 0600。
+    /// config.toml、代理专用 auth.json 与 .env 都可能含节点身份，写入后限制为 0600。
     @discardableResult
     static func exportCodexHome(
         for profile: NodeProfile,
@@ -644,7 +644,7 @@ class NodeProfileStore: ObservableObject {
             return nil
         }
 
-        // 独立 CODEX_HOME 不能继承 ~/.codex/auth.json 的 ChatGPT 登录，否则自定义 base_url 仍会被忽略。
+        // 独立 CODEX_HOME 不能继承 ~/.codex/auth.json 的 ChatGPT 登录；只写代理专用 API 身份。
         let isolatedAuth = (dir as NSString).appendingPathComponent("auth.json")
         var stubObject: [String: Any] = ["auth_mode": "apikey"]
         if let key = proxyAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {

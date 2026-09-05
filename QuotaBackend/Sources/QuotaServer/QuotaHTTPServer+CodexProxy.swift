@@ -8,6 +8,49 @@ import QuotaBackend
 // 与 Claude 的 `/v1/messages` 处理逻辑保持一致的结构与日志格式。
 
 extension QuotaHTTPServer {
+    struct CodexRequestIdentity: Equatable, Sendable {
+        let sessionID: String?
+        let conversationID: String?
+    }
+
+    /// Codex 0.145+ 使用连字符 header；旧版/兼容客户端曾使用下划线格式。
+    /// `x-codex-turn-metadata` 作为最后回退，保证统计关联使用 rollout 的稳定会话 id。
+    static func codexRequestIdentity(from headers: [String: String]) -> CodexRequestIdentity {
+        let metadata: [String: Any]
+        if let raw = headers["x-codex-turn-metadata"],
+           let data = raw.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            metadata = object
+        } else {
+            metadata = [:]
+        }
+
+        func firstNonEmpty(_ values: [String?]) -> String? {
+            values.compactMap { value in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : trimmed
+            }.first
+        }
+
+        return CodexRequestIdentity(
+            sessionID: firstNonEmpty([
+                headers["session-id"],
+                headers["session_id"],
+                metadata["session_id"] as? String,
+                metadata["sessionId"] as? String,
+                headers["thread-id"],
+                metadata["thread_id"] as? String,
+            ]),
+            conversationID: firstNonEmpty([
+                headers["conversation-id"],
+                headers["conversation_id"],
+                headers["thread-id"],
+                metadata["thread_id"] as? String,
+                metadata["threadId"] as? String,
+            ])
+        )
+    }
+
     func codexErrorResponse(
         message: String,
         type: String,
@@ -128,6 +171,7 @@ extension QuotaHTTPServer {
         headers: [String: String]
     ) async -> HTTPResponse {
         let requestModel = Self.peekModel(from: request.body)
+        let requestIdentity = Self.codexRequestIdentity(from: request.headers)
         let startTime = Date()
         do {
             let result = try await proxy.passthroughResponses(rawBody: request.body, inboundHeaders: request.headers)
@@ -144,7 +188,10 @@ extension QuotaHTTPServer {
                     outputTokens: result.usage?.outputTokens ?? 0,
                     cacheCreationTokens: 0,
                     cacheReadTokens: result.usage?.cachedTokens ?? 0,
-                    nodeId: activeNodeId
+                    nodeId: activeNodeId,
+                    sessionId: requestIdentity.sessionID,
+                    conversationId: requestIdentity.conversationID,
+                    upstreamRequestId: result.requestID
                 )
             } else {
                 let bodyText = String(data: result.data, encoding: .utf8) ?? ""
@@ -156,7 +203,10 @@ extension QuotaHTTPServer {
                     errorMessage: String(bodyText.prefix(500)),
                     errorType: "upstream_error",
                     statusCode: result.statusCode,
-                    nodeId: activeNodeId
+                    nodeId: activeNodeId,
+                    sessionId: requestIdentity.sessionID,
+                    conversationId: requestIdentity.conversationID,
+                    upstreamRequestId: result.requestID
                 )
             }
 
@@ -179,7 +229,10 @@ extension QuotaHTTPServer {
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                sessionId: requestIdentity.sessionID,
+                conversationId: requestIdentity.conversationID,
+                upstreamRequestId: errorResult.response.requestID
             )
             httpLog.error("  ✗ Codex passthrough error: \(error.localizedDescription)")
             var responseHeaders = headers
@@ -201,6 +254,7 @@ extension QuotaHTTPServer {
         request: HTTPRequest
     ) async {
         let requestModel = Self.peekModel(from: request.body)
+        let requestIdentity = Self.codexRequestIdentity(from: request.headers)
         let streamStartTime = Date()
         var firstTokenAt: Date?
         let streamer = StreamingResponse(connection: connection)
@@ -240,7 +294,9 @@ extension QuotaHTTPServer {
                 outputTokens: usage?.outputTokens ?? 0,
                 cacheCreationTokens: 0,
                 cacheReadTokens: usage?.cachedTokens ?? 0,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                sessionId: requestIdentity.sessionID,
+                conversationId: requestIdentity.conversationID
             )
         } catch {
             httpLog.error("  ✗ Codex streaming passthrough error: \(error.localizedDescription)")
@@ -262,7 +318,10 @@ extension QuotaHTTPServer {
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                sessionId: requestIdentity.sessionID,
+                conversationId: requestIdentity.conversationID,
+                upstreamRequestId: errorResult.response.requestID
             )
         }
 

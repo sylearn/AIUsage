@@ -1,8 +1,8 @@
 import Foundation
 
 actor CodexCostFileScanCache {
-    // v6: Codex JSONL 由“订阅/rate_limits”改为“非代理 token”轨，旧缓存标签必须重解析。
-    static let artifactVersion = 6
+    // v7: aggregate 纳入按会话代理覆盖去重，旧缓存必须重解析。
+    static let artifactVersion = 7
     var entriesByFile: [String: CodexParsedFile] = [:]
     var hasLoadedDiskCache = false
 
@@ -16,6 +16,25 @@ actor CodexCostFileScanCache {
                 continue
             }
             matching[file] = entry
+        }
+        return matching
+    }
+
+    /// 路由签名可能刚变化，但文件本身未变；此时仍可复用 session_meta，避免每次统计刷新
+    /// 都重新解析所有 rollout 的首行。完整 aggregate 是否可复用仍由 `entries(matching:)` 判定。
+    func metadata(matchingFileState fingerprintsByFile: [String: CodexFileFingerprint]) -> [String: SessionMetadata] {
+        loadDiskCacheIfNeeded()
+
+        var matching: [String: SessionMetadata] = [:]
+        for (file, fingerprint) in fingerprintsByFile {
+            guard let entry = entriesByFile[file],
+                  entry.fingerprint.path == fingerprint.path,
+                  entry.fingerprint.size == fingerprint.size,
+                  entry.fingerprint.modifiedAt == fingerprint.modifiedAt,
+                  let metadata = entry.metadata else {
+                continue
+            }
+            matching[file] = metadata
         }
         return matching
     }

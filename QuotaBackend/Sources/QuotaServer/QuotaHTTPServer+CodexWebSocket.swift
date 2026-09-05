@@ -174,6 +174,7 @@ extension QuotaHTTPServer {
         }
 
         let requestModel = Self.peekModel(from: body)
+        let requestIdentity = Self.codexRequestIdentity(from: inboundHeaders)
         let streamStartTime = Date()
         var firstTokenAt: Date?
         let usageRef = CodexWebSocketUsageRef()
@@ -211,7 +212,9 @@ extension QuotaHTTPServer {
                 outputTokens: usage?.outputTokens ?? 0,
                 cacheCreationTokens: 0,
                 cacheReadTokens: usage?.cachedTokens ?? 0,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                sessionId: requestIdentity.sessionID,
+                conversationId: requestIdentity.conversationID
             )
         } catch is CancellationError {
             return
@@ -241,7 +244,10 @@ extension QuotaHTTPServer {
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                sessionId: requestIdentity.sessionID,
+                conversationId: requestIdentity.conversationID,
+                upstreamRequestId: errorResult.response.requestID
             )
         }
     }
@@ -390,6 +396,7 @@ actor CodexWebSocketContextStore {
         let externalParentID: String?
         let contextItems: [Any]
         let warmupDefaults: [String: Any]?
+        let routeIdentity: ObjectIdentifier?
         let estimatedBytes: Int
     }
 
@@ -400,21 +407,11 @@ actor CodexWebSocketContextStore {
     private var entries: [String: Entry] = [:]
     private var insertionOrder: [String] = []
     private var cachedBytes = 0
-    private var routeOwner: AnyObject?
-
-    private func resetIfRouteChanged(_ owner: AnyObject) {
-        guard routeOwner !== owner else { return }
-        routeOwner = owner
-        entries.removeAll(keepingCapacity: false)
-        insertionOrder.removeAll(keepingCapacity: false)
-        cachedBytes = 0
-    }
-
     func prepare(
         event: [String: Any],
         routeOwner owner: AnyObject? = nil
     ) throws -> CodexWebSocketPreparedRequest {
-        if let owner { resetIfRouteChanged(owner) }
+        let routeIdentity = owner.map(ObjectIdentifier.init)
 
         var body = event
         body.removeValue(forKey: "type")
@@ -457,7 +454,9 @@ actor CodexWebSocketContextStore {
         var inheritedDefaults: [String: Any]?
         if let previousID, let entry = entries[previousID] {
             priorItems = entry.contextItems
-            externalParentID = entry.externalParentID
+            // 上游 response id 只在创建它的节点内有效。切换节点后保留本地完整上下文，
+            // 但去掉旧节点的 parent id，让新节点从展开后的 input 无缝继续。
+            externalParentID = entry.routeIdentity == routeIdentity ? entry.externalParentID : nil
             inheritedDefaults = entry.warmupDefaults
 
             if let defaults = inheritedDefaults {
@@ -488,6 +487,7 @@ actor CodexWebSocketContextStore {
                 externalParentID: externalParentID,
                 contextItems: contextItems,
                 warmupDefaults: defaults,
+                routeIdentity: routeIdentity,
                 estimatedBytes: Self.estimatedSize(contextItems) + Self.estimatedSize(defaults)
             )
             guard insert(entry) else {
@@ -511,7 +511,7 @@ actor CodexWebSocketContextStore {
                 externalParentID: externalParentID,
                 inputItems: inputItems,
                 warmupDefaults: defaults,
-                routeIdentity: owner.map(ObjectIdentifier.init)
+                routeIdentity: routeIdentity
             )
         }
 
@@ -543,13 +543,11 @@ actor CodexWebSocketContextStore {
             externalParentID: externalParentID,
             inputItems: inputItems,
             warmupDefaults: carriedDefaults,
-            routeIdentity: owner.map(ObjectIdentifier.init)
+            routeIdentity: routeIdentity
         )
     }
 
     func recordCompleted(response: [String: Any], for request: CodexWebSocketPreparedRequest) {
-        if let identity = request.routeIdentity,
-           routeOwner.map(ObjectIdentifier.init) != identity { return }
         guard let responseID = response["id"] as? String, !responseID.isEmpty else { return }
         let outputItems = response["output"] as? [Any] ?? []
         let contextItems = request.priorItems + request.inputItems + outputItems
@@ -558,6 +556,7 @@ actor CodexWebSocketContextStore {
             externalParentID: request.externalParentID,
             contextItems: contextItems,
             warmupDefaults: request.warmupDefaults,
+            routeIdentity: request.routeIdentity,
             estimatedBytes: Self.estimatedSize(contextItems)
                 + (request.warmupDefaults.map { Self.estimatedSize($0) } ?? 0)
         )

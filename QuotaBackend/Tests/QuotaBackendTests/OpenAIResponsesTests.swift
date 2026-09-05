@@ -1139,4 +1139,22 @@ final class OpenAIResponsesTests: XCTestCase {
         XCTAssertEqual(usage.cachedTokens, 800)
         XCTAssertEqual(usage.outputTokens, 120)
     }
+
+    func testCodexPassthroughForwardsCurrentIdentityHeadersWithoutClientAuthorization() {
+        let headers = CodexProxyService.forwardableHeaders(from: [
+            "authorization": "Bearer local-client-key",
+            "session-id": "session-current",
+            "thread-id": "thread-current",
+            "x-client-request-id": "request-current",
+            "x-codex-turn-metadata": "{\"session_id\":\"session-current\"}",
+            "originator": "Codex Desktop",
+        ])
+
+        XCTAssertNil(headers["Authorization"])
+        XCTAssertEqual(headers["session-id"], "session-current")
+        XCTAssertEqual(headers["thread-id"], "thread-current")
+        XCTAssertEqual(headers["x-client-request-id"], "request-current")
+        XCTAssertEqual(headers["x-codex-turn-metadata"], "{\"session_id\":\"session-current\"}")
+        XCTAssertEqual(headers["originator"], "Codex Desktop")
+    }
 }

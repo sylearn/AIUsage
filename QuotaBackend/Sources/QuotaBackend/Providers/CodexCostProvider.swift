@@ -27,7 +27,7 @@ public struct CodexCostProvider: ProviderFetcher {
     static let fileScanCache = CodexCostFileScanCache()
     /// 非代理轨永久归档（账号无关、每个 home 一张）。代理轨直接读代理用量归档文件。
     static let nonProxyArchive = CodexNonProxyUsageArchiveStore()
-    static let scanCacheSchemaVersion = 5
+    static let scanCacheSchemaVersion = 6
     static let defaultScanDays = 30
     static let filenameDateRegex = try? NSRegularExpression(pattern: "(\\d{4}-\\d{2}-\\d{2})")
 
@@ -53,6 +53,7 @@ public struct CodexCostProvider: ProviderFetcher {
     public func fetchUsage() async throws -> ProviderUsage {
         let now = Date()
         let todayKey = dayKey(now)
+        let proxyArchive = loadProxyArchive()
 
         // 首次（非代理归档从未完成全量）触发全量扫描以冻结所有历史非代理日；之后只扫窗口。
         let shouldImportFullHistory = await Self.nonProxyArchive.consumeFullHistoryImportRequest(homeDirectory: homeDirectory)
@@ -61,7 +62,9 @@ public struct CodexCostProvider: ProviderFetcher {
         // 1) 扫描 JSONL（非代理轨数据源）。无 Codex 日志也允许：代理轨可能仍有代理归档数据。
         let roots = resolveSessionRoots().filter { FileManager.default.fileExists(atPath: $0) }
         let files = roots.isEmpty ? [] : collectJSONLFiles(roots: roots, scanWindow: scanWindow)
-        let snapshot = files.isEmpty ? CodexUsageSnapshot() : await scanFiles(files)
+        let snapshot = files.isEmpty
+            ? CodexUsageSnapshot()
+            : await scanFiles(files, routing: proxyArchive.routing)
         relieveMallocPressure()
 
         // 2) 非代理轨：(Non-Proxy) 模型仅统计 token、成本恒 0 → 逐日冻结进永久归档。
@@ -75,7 +78,7 @@ public struct CodexCostProvider: ProviderFetcher {
         )
 
         // 3) 代理轨：读代理用量永久归档（成本逐条冻结）。
-        let proxyDays = loadProxyDays()
+        let proxyDays = proxyArchive.days
 
         // 4) 合并两轨。
         let combined = combineTrackDays(proxy: proxyDays, nonProxy: nonProxyDays)

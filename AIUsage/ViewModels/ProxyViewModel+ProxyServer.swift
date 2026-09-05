@@ -676,6 +676,9 @@ extension ProxyViewModel {
             errorMessage: json["error"] as? String,
             errorType: json["error_type"] as? String,
             statusCode: json["status_code"] as? Int,
+            sessionId: (json["session_id"] as? String)?.nilIfBlank,
+            conversationId: (json["conversation_id"] as? String)?.nilIfBlank,
+            upstreamRequestId: (json["upstream_request_id"] as? String)?.nilIfBlank,
             clientSurface: (json["client_surface"] as? String)?.nilIfBlank
         )
 

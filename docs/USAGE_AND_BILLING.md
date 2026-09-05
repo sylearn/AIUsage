@@ -42,7 +42,7 @@ Codex 统计是双轨合并。
 ~/.config/aiusage/usage-archive/proxy-usage-codex-v1.json
 ```
 
-这条轨道只来自 AIUsage Codex 代理请求。成本在请求发生时按节点定价冻结，模型名在统计层加 ` (Proxy)` 后缀。Codex JSONL 里标记为 `model_provider = aiusage-proxy` 的行会被丢弃，因为同一请求已经由代理归档记录，继续扫描 JSONL 会双计。
+这条轨道只来自 AIUsage Codex 代理请求。成本在请求发生时按节点定价冻结，模型名在统计层加 ` (Proxy)` 后缀。归档同时保存每个请求的 Codex `session-id` / `thread-id`、日期、请求模型与 token 明细，供 JSONL 扫描精确去重。
 
 OpenAI Responses 的 `input_tokens_details.cached_tokens` 是 `input_tokens` 的子集。AIUsage 代理在写日志前会规范化：
 
@@ -63,7 +63,9 @@ cacheReadTokens = min(cached_tokens, input_tokens)
 ~/.config/aiusage/usage-archive/codex-non-proxy-usage-v1.json
 ```
 
-非代理行包括 Codex 订阅账号和第三方直连，只统计 token，成本恒为 0，模型名在统计层加 ` (Non-Proxy)` 后缀。今天的数据会随 JSONL 重算；今天之前的数据会冻结进 `codex-non-proxy-usage-v1.json`，删除本地 JSONL 后历史 token 不丢。
+账号和 AIUsage API 都使用内置 `openai` provider，所以同一会话可以混合两种来源。非代理轨按「JSONL token 总量 − 同会话/日期/模型的代理归档覆盖」计算；剩余部分包括 Codex 订阅账号和第三方直连，只统计 token、成本恒为 0，模型名加 ` (Non-Proxy)` 后缀。今天的数据会随 JSONL 重算；今天之前的数据会冻结进 `codex-non-proxy-usage-v1.json`，删除本地 JSONL 后历史 token 不丢。
+
+AIUsage 启动时会把自己旧版本写入的 `model_provider = aiusage-proxy` 会话元数据原位迁移为 `openai`。迁移 journal 保留时间截点，截点前已由代理归档负责的 JSONL 行仍会被排除；其它第三方 provider 不会被改写。
 
 旧路径 `codex-subscription-usage-v1.json` 会读取并迁移到新非代理归档。旧模型后缀 ` (Sub)` 会迁移为 ` (Non-Proxy)`，旧 ` (API)` 行会丢弃，避免把代理历史误放进非代理轨。
 

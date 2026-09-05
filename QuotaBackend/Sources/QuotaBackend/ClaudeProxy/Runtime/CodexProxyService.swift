@@ -160,12 +160,20 @@ public actor CodexProxyService {
     private static let forwardableHeaderMap: [String: String] = [
         "openai-beta": "OpenAI-Beta",
         "originator": "originator",
+        "session-id": "session-id",
+        "thread-id": "thread-id",
+        "conversation-id": "conversation-id",
         "session_id": "session_id",
         "conversation_id": "conversation_id",
+        "x-client-request-id": "x-client-request-id",
+        "x-codex-turn-metadata": "x-codex-turn-metadata",
+        "x-codex-window-id": "x-codex-window-id",
+        "x-codex-beta-features": "x-codex-beta-features",
+        "version": "version",
         "user-agent": "User-Agent"
     ]
 
-    private static func forwardableHeaders(from inbound: [String: String]) -> [String: String] {
+    static func forwardableHeaders(from inbound: [String: String]) -> [String: String] {
         var out: [String: String] = [:]
         for (lowerKey, canonical) in forwardableHeaderMap {
             if let value = inbound[lowerKey], !value.isEmpty {

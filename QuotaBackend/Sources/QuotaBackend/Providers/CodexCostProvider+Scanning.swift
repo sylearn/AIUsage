@@ -1,24 +1,38 @@
 import Foundation
 
 extension CodexCostProvider {
-    func scanFiles(_ files: [String]) async -> CodexUsageSnapshot {
-        let fingerprintsByFile = fileFingerprints(files)
-        let cachedByFile = await Self.fileScanCache.entries(matching: fingerprintsByFile)
+    func scanFiles(_ files: [String], routing: CodexProxyRoutingSnapshot) async -> CodexUsageSnapshot {
         var parsedUpdates: [String: CodexParsedFile] = [:]
 
         var metadataByFile: [String: SessionMetadata] = [:]
         var fileBySessionId: [String: String] = [:]
+        let fileStates = Dictionary(uniqueKeysWithValues: files.map { ($0, fileFingerprint($0)) })
+        let cachedMetadata = await Self.fileScanCache.metadata(matchingFileState: fileStates)
 
         for file in files {
-            guard let metadata = cachedByFile[file]?.metadata ?? parseSessionMetadata(file) else { continue }
+            guard let metadata = cachedMetadata[file] ?? parseSessionMetadata(file) else { continue }
             metadataByFile[file] = metadata
             if let sessionId = metadata.sessionId, fileBySessionId[sessionId] == nil {
                 fileBySessionId[sessionId] = file
             }
         }
 
+        let fingerprintsByFile = fileFingerprints(
+            files,
+            metadataByFile: metadataByFile,
+            routing: routing
+        )
+        let cachedByFile = await Self.fileScanCache.entries(matching: fingerprintsByFile)
+
         var filesToParse = Set(files.filter { cachedByFile[$0] == nil })
         var changedSessionIds = Set(filesToParse.compactMap { metadataByFile[$0]?.sessionId })
+        // 同一任务可能有多个 rollout 文件。路由覆盖按 session 聚合，只要其中一个文件变化就整组重算，
+        // 避免同一份代理 token 被多个文件各扣一次。
+        for (file, metadata) in metadataByFile {
+            if let sessionID = metadata.sessionId, changedSessionIds.contains(sessionID) {
+                filesToParse.insert(file)
+            }
+        }
         var addedDependent = true
         while addedDependent {
             addedDependent = false
@@ -69,11 +83,23 @@ extension CodexCostProvider {
         }
 
         var snapshot = CodexUsageSnapshot()
+        var remainingCoverageBySession = routing.sessions
         for file in files {
             let metadata = metadataByFile[file]
             let fileAggregate: CodexFileAggregate
             if filesToParse.contains(file) {
-                fileAggregate = parseFile(file, metadata: metadata, inheritedTotals: inheritedTotals)
+                let sessionID = metadata?.sessionId
+                var sessionCoverage = sessionID.flatMap { remainingCoverageBySession[$0] } ?? [:]
+                fileAggregate = parseFile(
+                    file,
+                    metadata: metadata,
+                    routing: routing,
+                    proxyCoverage: &sessionCoverage,
+                    inheritedTotals: inheritedTotals
+                )
+                if let sessionID {
+                    remainingCoverageBySession[sessionID] = sessionCoverage
+                }
                 if let fingerprint = fingerprintsByFile[file] {
                     parsedUpdates[file] = CodexParsedFile(
                         fingerprint: fingerprint,
@@ -106,13 +132,18 @@ extension CodexCostProvider {
         return snapshot
     }
 
-    func fileFingerprints(_ files: [String]) -> [String: CodexFileFingerprint] {
+    func fileFingerprints(
+        _ files: [String],
+        metadataByFile: [String: SessionMetadata],
+        routing: CodexProxyRoutingSnapshot
+    ) -> [String: CodexFileFingerprint] {
         Dictionary(uniqueKeysWithValues: files.map { file in
-            (file, fileFingerprint(file))
+            let sessionID = metadataByFile[file]?.sessionId
+            return (file, fileFingerprint(file, routingSignature: routing.signature(for: sessionID)))
         })
     }
 
-    func fileFingerprint(_ path: String) -> CodexFileFingerprint {
+    func fileFingerprint(_ path: String, routingSignature: String = "") -> CodexFileFingerprint {
         let attributes = try? FileManager.default.attributesOfItem(atPath: path)
         let size = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
         let modifiedAt = (attributes?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
@@ -120,7 +151,7 @@ extension CodexCostProvider {
             path: path,
             size: size,
             modifiedAt: modifiedAt,
-            scanSignature: scanCacheSignature()
+            scanSignature: scanCacheSignature(routingSignature: routingSignature)
         )
     }
 

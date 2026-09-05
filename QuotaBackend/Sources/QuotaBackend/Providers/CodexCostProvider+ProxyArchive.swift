@@ -10,6 +10,18 @@ import Foundation
 extension CodexCostProvider {
     static let proxyUsageArchiveVersion = 1
 
+    struct LoadedProxyArchive {
+        var days: [String: CodexAggregateBucket] = [:]
+        var routing = CodexProxyRoutingSnapshot()
+    }
+
+    private struct ProxyUsageSessionAggDTO: Decodable {
+        let inputTokens: Int
+        let outputTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreateTokens: Int
+    }
+
     private struct ProxyUsageModelAggDTO: Decodable {
         let inputTokens: Int
         let outputTokens: Int
@@ -18,6 +30,8 @@ extension CodexCostProvider {
         let costUSD: Double
         let requests: Int
         let pricingResolvedRequests: Int?
+        /// session/conversation id → Codex 请求模型 → token。
+        let sessions: [String: [String: ProxyUsageSessionAggDTO]]?
     }
 
     private struct ProxyUsageDayDTO: Decodable {
@@ -35,15 +49,22 @@ extension CodexCostProvider {
             .appendingPathComponent(".config/aiusage/usage-archive/proxy-usage-codex-v\(Self.proxyUsageArchiveVersion).json")
     }
 
-    /// 读取 Codex 代理用量归档 → 按日 `CodexAggregateBucket`，模型加 " (Proxy)" 标签，成本采用冻结的 `costUSD`。
-    func loadProxyDays() -> [String: CodexAggregateBucket] {
+    /// 一次读取代理总量和会话路由凭据，确保展示与 JSONL 去重使用同一份归档快照。
+    func loadProxyArchive() -> LoadedProxyArchive {
         let path = proxyUsageArchivePath()
         guard let data = FileManager.default.contents(atPath: path),
               let dto = try? JSONDecoder().decode(ProxyUsageArchiveDTO.self, from: data) else {
-            return [:]
+            var empty = LoadedProxyArchive()
+            empty.routing.legacyProxyCutoffs = CodexSessionProviderMigrator.legacyProxyCutoffs(
+                homeDirectory: homeDirectory
+            )
+            return empty
         }
 
-        var result: [String: CodexAggregateBucket] = [:]
+        var result = LoadedProxyArchive()
+        result.routing.legacyProxyCutoffs = CodexSessionProviderMigrator.legacyProxyCutoffs(
+            homeDirectory: homeDirectory
+        )
         for (day, dayDTO) in dto.days {
             var bucket = CodexAggregateBucket.empty
             for (modelName, agg) in dayDTO.models {
@@ -66,8 +87,23 @@ extension CodexCostProvider {
                 bucket.usageRows += requestCount
                 bucket.totalTokens += total
                 bucket.estimatedCostUsd += agg.costUSD
+
+                for (sessionID, requestedModels) in agg.sessions ?? [:] {
+                    for (requestedModel, usage) in requestedModels {
+                        let normalized = normalizeModel(requestedModel)
+                        var existing = result.routing.sessions[sessionID]?[day]?[normalized]
+                            ?? CodexProxyTokenCoverage()
+                        existing.merge(CodexProxyTokenCoverage(
+                            inputTokens: usage.inputTokens,
+                            outputTokens: usage.outputTokens,
+                            cacheReadTokens: usage.cacheReadTokens,
+                            cacheCreateTokens: usage.cacheCreateTokens
+                        ))
+                        result.routing.sessions[sessionID, default: [:]][day, default: [:]][normalized] = existing
+                    }
+                }
             }
-            if !bucket.models.isEmpty { result[day] = bucket }
+            if !bucket.models.isEmpty { result.days[day] = bucket }
         }
         return result
     }

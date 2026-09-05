@@ -5,6 +5,29 @@ import XCTest
 @testable import QuotaServerCore
 
 final class CodexWebSocketTests: XCTestCase {
+    func testCodexRequestIdentityAcceptsCurrentAndLegacyHeaders() {
+        let current = QuotaHTTPServer.codexRequestIdentity(from: [
+            "session-id": "session-current",
+            "thread-id": "thread-current",
+            "x-codex-turn-metadata": "{\"session_id\":\"metadata-session\",\"thread_id\":\"metadata-thread\"}",
+        ])
+        XCTAssertEqual(current.sessionID, "session-current")
+        XCTAssertEqual(current.conversationID, "thread-current")
+
+        let legacy = QuotaHTTPServer.codexRequestIdentity(from: [
+            "session_id": "session-legacy",
+            "conversation_id": "conversation-legacy",
+        ])
+        XCTAssertEqual(legacy.sessionID, "session-legacy")
+        XCTAssertEqual(legacy.conversationID, "conversation-legacy")
+
+        let metadataOnly = QuotaHTTPServer.codexRequestIdentity(from: [
+            "x-codex-turn-metadata": "{\"session_id\":\"metadata-session\",\"thread_id\":\"metadata-thread\"}",
+        ])
+        XCTAssertEqual(metadataOnly.sessionID, "metadata-session")
+        XCTAssertEqual(metadataOnly.conversationID, "metadata-thread")
+    }
+
     func testUpgradeValidationRequiresRFC6455Headers() {
         let valid = [
             "upgrade": "websocket",
@@ -151,6 +174,33 @@ final class CodexWebSocketTests: XCTestCase {
         ])
         let body = try jsonObject(try XCTUnwrap(second.httpBody))
         XCTAssertEqual(body["previous_response_id"] as? String, "resp_external")
+        XCTAssertEqual((body["input"] as? [Any])?.count, 3)
+    }
+
+    func testLocalContinuationSurvivesRouteSwitchWithoutLeakingOldParentID() async throws {
+        let store = CodexWebSocketContextStore()
+        let firstRoute = NSObject()
+        let secondRoute = NSObject()
+        let first = try await store.prepare(event: [
+            "type": "response.create",
+            "model": "gpt-test",
+            "previous_response_id": "resp_first_upstream",
+            "input": [["type": "message", "role": "user", "content": []]],
+        ], routeOwner: firstRoute)
+        await store.recordCompleted(response: [
+            "id": "resp_local_before_switch",
+            "output": [["type": "message", "role": "assistant", "content": []]],
+        ], for: first)
+
+        let continued = try await store.prepare(event: [
+            "type": "response.create",
+            "model": "gpt-test",
+            "previous_response_id": "resp_local_before_switch",
+            "input": [["type": "message", "role": "user", "content": []]],
+        ], routeOwner: secondRoute)
+        let body = try jsonObject(try XCTUnwrap(continued.httpBody))
+
+        XCTAssertNil(body["previous_response_id"])
         XCTAssertEqual((body["input"] as? [Any])?.count, 3)
     }
 
@@ -329,7 +379,12 @@ final class CodexWebSocketTests: XCTestCase {
             model: nil,
             maxOutputTokens: nil
         )))
-        try await sendCreate(socket, streamID: "switched", input: "after-switch")
+        try await sendCreate(
+            socket,
+            streamID: "switched",
+            input: "after-switch",
+            previousResponseID: "resp-fast"
+        )
 
         var switchedResponseID: String?
         while switchedResponseID == nil {
@@ -342,6 +397,11 @@ final class CodexWebSocketTests: XCTestCase {
         XCTAssertEqual(switchedResponseID, "resp-switched")
         let switchedRequests = await secondUpstream.recordedRequests()
         XCTAssertEqual(switchedRequests.count, 1)
+        let switchedBody = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(switchedRequests.first?.body)) as? [String: Any]
+        )
+        XCTAssertNil(switchedBody["previous_response_id"])
+        XCTAssertEqual((switchedBody["input"] as? [Any])?.count, 2)
     }
 
     private func jsonObject(_ data: Data) throws -> [String: Any] {
@@ -351,14 +411,19 @@ final class CodexWebSocketTests: XCTestCase {
     private func sendCreate(
         _ socket: RawWebSocketTestClient,
         streamID: String,
-        input: String
+        input: String,
+        previousResponseID: String? = nil
     ) async throws {
-        let data = try JSONSerialization.data(withJSONObject: [
+        var event: [String: Any] = [
             "type": "response.create",
             "stream_id": streamID,
             "model": "gpt-test",
             "input": input,
-        ])
+        ]
+        if let previousResponseID {
+            event["previous_response_id"] = previousResponseID
+        }
+        let data = try JSONSerialization.data(withJSONObject: event)
         try await socket.sendText(String(decoding: data, as: UTF8.self))
     }
 

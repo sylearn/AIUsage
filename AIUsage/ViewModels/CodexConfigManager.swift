@@ -1,10 +1,11 @@
 import Darwin
 import Foundation
+import QuotaBackend
 import os.log
 
 // MARK: - Codex Config Manager
-// 管理 ~/.codex/config.toml：以「外科式合并」方式注入受管理的 [model_providers.aiusage-proxy]
-// 块，并把顶层 model / model_provider 指向本地代理；停用时从备份完整还原原文。
+// 管理 ~/.codex/config.toml：以「外科式合并」方式把内置 openai provider 的
+// openai_base_url 指向本地代理；停用时从备份还原原文。
 //
 // 数据来源/写入目标: ~/.codex/config.toml
 // 工作方式: 纯字符串处理，不引入 TOML 第三方库。激活前把「干净原文」备份到
@@ -16,6 +17,7 @@ private let codexConfigLog = Logger(subsystem: "com.aiusage.desktop", category: 
 enum CodexConfigError: LocalizedError {
     case unreadableConfig
     case unreadableManagedFile(String)
+    case invalidManagedConfig
     case failedToCreateDirectory
     case failedToWriteFile
     case failedToRestore
@@ -28,6 +30,11 @@ enum CodexConfigError: LocalizedError {
             return AppSettings.shared.t(
                 "Codex file \(name) is unreadable.",
                 "Codex 文件 \(name) 无法读取。"
+            )
+        case .invalidManagedConfig:
+            return AppSettings.shared.t(
+                "AIUsage refused to write an unsafe Codex proxy configuration.",
+                "AIUsage 已阻止写入不安全的 Codex 代理配置。"
             )
         case .failedToCreateDirectory:
             return AppSettings.shared.t("Failed to create the Codex config directory.", "创建 Codex 配置目录失败。")
@@ -42,8 +49,8 @@ enum CodexConfigError: LocalizedError {
 final class CodexConfigManager {
     static let shared = CodexConfigManager()
 
-    /// 受管理的 provider id。Codex 保留 openai/ollama/lmstudio，aiusage-proxy 不冲突。
-    static let providerId = "aiusage-proxy"
+    /// 账号与代理始终使用同一个内置 provider，避免会话固定到临时自定义 provider 后无法恢复。
+    static let providerId = CodexSessionProviderMigrator.currentProvider
 
     private let fileManager = FileManager.default
 
@@ -81,6 +88,8 @@ final class CodexConfigManager {
     private var isRestoringChatGPTAuth = false
     /// 代理身份写入 auth.json / .env 的 client key。监视回调重写桩时用。
     private var lastProxyAPIKey: String?
+    private let sessionMigrationLock = NSLock()
+    private var didMigrateSessions = false
 
     // MARK: - State
 
@@ -95,17 +104,30 @@ final class CodexConfigManager {
         fileManager.fileExists(atPath: backupPath)
     }
 
+    /// 每个 AIUsage 进程只扫描一次；失败不置位，后续激活/还原会自动重试。
+    @discardableResult
+    func migrateLegacySessionsIfNeeded() throws -> CodexSessionProviderMigrator.Report {
+        sessionMigrationLock.lock()
+        defer { sessionMigrationLock.unlock() }
+        guard !didMigrateSessions else {
+            return .init(scannedFiles: 0, migratedFiles: 0)
+        }
+        let report = try CodexSessionProviderMigrator.migrate()
+        didMigrateSessions = true
+        return report
+    }
+
     // MARK: - Activation
 
     /// 注入受管理的代理配置，并让 live `~/.codex` 只保留节点身份：
     /// config.toml 指向本地代理；`auth.json` 只含 apikey + 代理 client key（ChatGPT 登录只存在 `.aiusage.bak`）；
     /// `~/.codex/.env` 写入 `OPENAI_BASE_URL`（本地代理）与同一把 client key。
-    /// 已登录账号时 Codex 会静默忽略自定义 provider 的 base_url（openai/codex#37245）；
-    /// 空桩会打到 `api.openai.com` 且不带 Bearer，报 401 Missing bearer。
+    /// 内置 openai provider + `openai_base_url` 保持会话 provider 稳定；强制 API 身份与代理
+    /// auth 桩共同防止已登录 ChatGPT 时流量绕过本地代理消耗账号额度。
     /// 停用 / 切账号时从备份整文还原 config.toml、auth.json，并去掉 `.env` 托管块。
     /// - Parameters:
     ///   - baseURL: 本地代理地址（含 /v1，Codex 会在其后拼 /responses）。
-    ///   - bearerToken: 通过 experimental_bearer_token 直接下发，Codex 以 Bearer 头发给本地代理。
+    ///   - bearerToken: 写入代理专用 auth.json / .env，Codex 以 Bearer 头发给本地代理。
     ///   - model: 写入顶层 model 的模型名（同时作为上游模型 / 定价键）。
     ///   - globalTOML: 全局通用配置基底（启用时传入；否则 nil）。
     ///   - nodeTOML: 当前节点的额外 TOML（覆盖全局同名顶层键 / 同名表）。
@@ -116,7 +138,18 @@ final class CodexConfigManager {
         globalTOML: String? = nil,
         nodeTOML: String? = nil
     ) throws {
+        try migrateLegacySessionsIfNeeded()
         let previousProxyAPIKey = lastProxyAPIKey
+        let persistedProxyAPIKey = CodexNoProxyFixer.managedAPIKeyIfPresent()
+        let currentAPIIdentityIsManaged = hasBackup
+            || isManaged
+            || fileManager.fileExists(atPath: authBackupPath)
+            || previousProxyAPIKey != nil
+            || persistedProxyAPIKey != nil
+        var knownManagedAPIKeys = Set([previousProxyAPIKey].compactMap { $0?.nilIfBlank })
+        if let persistedProxyAPIKey {
+            knownManagedAPIKeys.insert(persistedProxyAPIKey)
+        }
         let wasWatching = authDirWatch != nil
         let merged = mergeBaseFragments(global: globalTOML ?? "", node: nodeTOML ?? "")
         stopAuthWatch()
@@ -132,11 +165,11 @@ final class CodexConfigManager {
             // 备份即真相源：若已有备份，原文以备份为准（保证重复激活幂等，不会把脏文件当原文）。
             let pristine: String?
             if hasBackup {
-                pristine = try readUTF8File(at: backupPath)
+                pristine = normalizeLegacyProviderReferences(in: try readUTF8File(at: backupPath))
             } else if fileManager.fileExists(atPath: configPath) {
                 let current = try readConfigIfExists() ?? ""
                 // 防御：万一当前文件里残留旧的受管理块，先剥离再作为原文备份。
-                let clean = stripManagedBlocks(from: current)
+                let clean = normalizeLegacyProviderReferences(in: stripManagedBlocks(from: current))
                 try writeBackup(clean)
                 pristine = clean
             } else {
@@ -151,7 +184,14 @@ final class CodexConfigManager {
                 baseTopLevel: merged.topLevel,
                 baseTables: merged.tables
             )
-            try installProxyAuthIdentity(proxyAPIKey: bearerToken)
+            guard validateManagedConfig(injected, expectedBaseURL: baseURL) else {
+                throw CodexConfigError.invalidManagedConfig
+            }
+            try installProxyAuthIdentity(
+                proxyAPIKey: bearerToken,
+                currentAPIIdentityIsManaged: currentAPIIdentityIsManaged,
+                knownManagedAPIKeys: knownManagedAPIKeys
+            )
             try writeConfig(injected)
             try CodexNoProxyFixer.apply(openAIBaseURL: baseURL, openAIAPIKey: bearerToken)
             lastProxyAPIKey = bearerToken
@@ -170,7 +210,7 @@ final class CodexConfigManager {
             if wasWatching { startAuthWatch() }
             throw operationError
         }
-        codexConfigLog.info("Codex config.toml proxy block injected (provider=\(Self.providerId, privacy: .public), baseKeys=\(merged.topLevel.count), baseTables=\(merged.tables.count))")
+        codexConfigLog.info("Codex config.toml proxy block injected (built-in provider=\(Self.providerId, privacy: .public), baseKeys=\(merged.topLevel.count), baseTables=\(merged.tables.count))")
     }
 
     // MARK: - Standalone Config (CODEX_HOME launch command)
@@ -186,7 +226,7 @@ final class CodexConfigManager {
         nodeTOML: String? = nil
     ) -> String {
         let merged = mergeBaseFragments(global: globalTOML ?? "", node: nodeTOML ?? "")
-        return injectManagedConfig(
+        let config = injectManagedConfig(
             into: "",
             baseURL: baseURL,
             bearerToken: bearerToken,
@@ -194,6 +234,8 @@ final class CodexConfigManager {
             baseTopLevel: merged.topLevel,
             baseTables: merged.tables
         )
+        assert(validateManagedConfig(config, expectedBaseURL: baseURL))
+        return config
     }
 
     // MARK: - Deactivation
@@ -201,9 +243,12 @@ final class CodexConfigManager {
     /// 还原 config.toml：有备份则整文覆盖回原文并删除备份；无备份则剥离受管理块（必要时删文件）。
     /// 无论 config 走哪条路径，都把暂存的 ChatGPT `auth.json` 还原回去。
     func restore() throws {
+        try migrateLegacySessionsIfNeeded()
         let previousProxyAPIKey = lastProxyAPIKey
         let wasWatching = authDirWatch != nil
+        let hadManagedConfig = isManaged
         let hadManagedBackup = hasBackup
+        let knownProxyAPIKey = previousProxyAPIKey ?? CodexNoProxyFixer.managedAPIKeyIfPresent()
         stopAuthWatch()
         let snapshots: [ManagedFileSnapshot]
         do {
@@ -217,13 +262,12 @@ final class CodexConfigManager {
         defer { isRestoringChatGPTAuth = false }
         do {
             if hasBackup {
-                let data = try Data(contentsOf: URL(fileURLWithPath: backupPath))
-                try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
-                applyRestrictivePermissions(at: configPath)
+                let restored = normalizeLegacyProviderReferences(in: try readUTF8File(at: backupPath))
+                try writeConfig(restored)
                 codexConfigLog.info("Codex config.toml restored from backup")
             } else if let current = try readConfigIfExists() {
                 // 无备份：可能是我们新建的文件（仅含受管理块），或本就未受管理。
-                let stripped = stripManagedBlocks(from: current)
+                let stripped = normalizeLegacyProviderReferences(in: stripManagedBlocks(from: current))
                 if stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     try removeFileIfExists(at: configPath)
                     codexConfigLog.info("Codex config.toml removed (was managed-only, no backup)")
@@ -233,7 +277,13 @@ final class CodexConfigManager {
                 }
             }
 
-            try restoreChatGPTAuthFiles(wroteProxyIdentity: previousProxyAPIKey != nil || hadManagedBackup)
+            try restoreChatGPTAuthFiles(
+                knownProxyAPIKey: knownProxyAPIKey,
+                wroteProxyIdentity: previousProxyAPIKey != nil
+                    || hadManagedConfig
+                    || hadManagedBackup
+                    || knownProxyAPIKey != nil
+            )
             try CodexNoProxyFixer.remove()
             try removeFileIfExists(at: backupPath)
             try removeFileIfExists(at: authBackupPath)
@@ -258,23 +308,40 @@ final class CodexConfigManager {
 
     /// 在干净原文上注入受管理配置。
     /// 结构（保证所有顶层键都在任何 [table] 之前，符合 TOML 语义）：
-    ///   HEADER(model + model_provider + 强制 API 登录) → BASE 顶层键块 → 用户 body（去重）→ BASE 表块 → PROVIDER 块。
+    ///   HEADER(model + 内置 openai provider + 强制 API 登录 + openai_base_url)
+    ///   → BASE 顶层键块 → 用户 body（去重）→ BASE 表块。
     /// 去重：删除 body 中与受管理块冲突的顶层键（model/model_provider/forced_login_method + BASE 顶层键）与同名 [table]，
     /// 避免 TOML 重复键/重复表解析错误（节点/全局配置在激活态优先生效；停用从备份完整还原）。
     func injectManagedConfig(
         into original: String,
         baseURL: String,
-        bearerToken: String,
+        bearerToken _: String,
         model: String,
         baseTopLevel: [String] = [],
         baseTables: [String] = []
     ) -> String {
-        let clean = stripManagedBlocks(from: original)
+        let clean = normalizeLegacyProviderReferences(in: stripManagedBlocks(from: original))
+
+        // provider / 认证 / 路由四个键只能由 HEADER 管理，不能被导入片段重复定义。
+        let safeBaseTopLevel = baseTopLevel.filter { line in
+            guard let key = topLevelKeyName(of: line.trimmingCharacters(in: .whitespaces)) else { return true }
+            return !["model", "model_provider", "forced_login_method", "openai_base_url"].contains(key)
+        }
+        let managedProviderHeaders = [
+            "model_providers.\(CodexSessionProviderMigrator.legacyAIUsageProvider)",
+            "model_providers.\(Self.providerId)",
+        ]
+        let safeBaseTables = baseTables.filter { block in
+            guard let header = firstTableHeader(in: block) else { return true }
+            return !managedProviderHeaders.contains { managed in
+                header == managed || header.hasPrefix("\(managed).")
+            }
+        }
 
         // 收集 BASE 块要覆盖的顶层键名 / 表头，用于从 body 剥离冲突项。
-        let baseKeyNames = Set(baseTopLevel.compactMap { topLevelKeyName(of: $0) })
-        var conflictTables = Set(baseTables.compactMap { firstTableHeader(in: $0) })
-        conflictTables.insert("model_providers.\(Self.providerId)")
+        let baseKeyNames = Set(safeBaseTopLevel.compactMap { topLevelKeyName(of: $0) })
+        var conflictTables = Set(safeBaseTables.compactMap { firstTableHeader(in: $0) })
+        conflictTables.formUnion(managedProviderHeaders)
 
         var body: [String] = []
         var seenTable = false
@@ -284,7 +351,10 @@ final class CodexConfigManager {
             if trimmed.hasPrefix("[") {
                 seenTable = true
                 let header = normalizedTableHeader(trimmed)
-                skipTableHeader = conflictTables.contains(header) ? header : nil
+                let belongsToManagedProvider = managedProviderHeaders.contains { managed in
+                    header == managed || header.hasPrefix("\(managed).")
+                }
+                skipTableHeader = conflictTables.contains(header) || belongsToManagedProvider ? header : nil
                 if skipTableHeader != nil { continue }
             } else if skipTableHeader != nil {
                 continue // 跳过冲突表内的行
@@ -304,37 +374,28 @@ final class CodexConfigManager {
             Self.headerBegin,
             "model = \(tomlString(model))",
             "model_provider = \(tomlString(Self.providerId))",
-            // 已登录 ChatGPT 时必须强制走 API/自定义 provider，否则只改显示名、流量仍打账号 websocket。
+            // 已登录 ChatGPT 时必须强制 API 身份，否则流量仍可能走账号 websocket。
             "forced_login_method = \"api\"",
-            // 顶层键，改内置 openai 的 base_url。不能写 [model_providers.openai]（保留 ID，ChatGPT 会拒读配置）。
+            // 官方支持的内置 openai 代理入口；不创建任何 [model_providers.*]。
             "openai_base_url = \(tomlString(baseURL))",
             Self.headerEnd,
         ]
-        if !baseTopLevel.isEmpty {
+        if !safeBaseTopLevel.isEmpty {
             header.append("")
             header.append(Self.baseBegin)
-            header.append(contentsOf: baseTopLevel)
+            header.append(contentsOf: safeBaseTopLevel)
             header.append(Self.baseEnd)
         }
         header.append("")
         let headerText = header.joined(separator: "\n")
 
         var tail: [String] = []
-        if !baseTables.isEmpty {
+        if !safeBaseTables.isEmpty {
             tail.append("")
             tail.append(Self.baseBegin)
-            tail.append(contentsOf: baseTables)
+            tail.append(contentsOf: safeBaseTables)
             tail.append(Self.baseEnd)
         }
-        tail.append("")
-        tail.append(Self.providerBegin)
-        tail.append(contentsOf: managedProviderTable(
-            id: Self.providerId,
-            displayName: "AIUsage Proxy",
-            baseURL: baseURL,
-            bearerToken: bearerToken
-        ))
-        tail.append(Self.providerEnd)
         tail.append("")
         let tailText = tail.joined(separator: "\n")
 
@@ -362,6 +423,45 @@ final class CodexConfigManager {
             result.append(line)
         }
         // 去掉因剥离产生的首尾多余空行。
+        return result.joined(separator: "\n")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+    }
+
+    /// 清理旧版 AIUsage 自定义 provider。只处理 AIUsage 自己的 id，不改用户的其它 provider。
+    func normalizeLegacyProviderReferences(in content: String) -> String {
+        var result: [String] = []
+        var inTopLevel = true
+        var skippingLegacyTable = false
+        let legacyHeader = "model_providers.\(CodexSessionProviderMigrator.legacyAIUsageProvider)"
+
+        for raw in content.components(separatedBy: "\n") {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                inTopLevel = false
+                let header = normalizedTableHeader(trimmed)
+                skippingLegacyTable = header == legacyHeader || header.hasPrefix("\(legacyHeader).")
+                if skippingLegacyTable { continue }
+            } else if skippingLegacyTable {
+                continue
+            }
+
+            if inTopLevel,
+               isTopLevelKey(trimmed, key: "model_provider"),
+               tomlInlineStringValue(of: trimmed) == CodexSessionProviderMigrator.legacyAIUsageProvider {
+                result.append(
+                    raw.replacingOccurrences(
+                        of: "\"\(CodexSessionProviderMigrator.legacyAIUsageProvider)\"",
+                        with: "\"\(Self.providerId)\""
+                    ).replacingOccurrences(
+                        of: "'\(CodexSessionProviderMigrator.legacyAIUsageProvider)'",
+                        with: "'\(Self.providerId)'"
+                    )
+                )
+            } else {
+                result.append(raw)
+            }
+        }
+
         return result.joined(separator: "\n")
             .trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
     }
@@ -471,6 +571,7 @@ final class CodexConfigManager {
     func parseImportedConfig(_ toml: String) -> ImportedCodexConfig {
         var activeProvider: String?
         var model: String?
+        var openAIBaseURL: String?
         var providerBaseURLs: [String: String] = [:]
 
         var currentHeader: String?
@@ -485,6 +586,8 @@ final class CodexConfigManager {
                     activeProvider = tomlInlineStringValue(of: trimmed)
                 } else if isTopLevelKey(trimmed, key: "model") {
                     model = tomlInlineStringValue(of: trimmed)
+                } else if isTopLevelKey(trimmed, key: "openai_base_url") {
+                    openAIBaseURL = tomlInlineStringValue(of: trimmed)
                 }
             } else if let header = currentHeader,
                       header.hasPrefix("model_providers."),
@@ -499,7 +602,9 @@ final class CodexConfigManager {
         }
 
         let baseURL: String?
-        if let active = activeProvider, let url = providerBaseURLs[active] {
+        if activeProvider == nil || activeProvider == Self.providerId {
+            baseURL = openAIBaseURL ?? activeProvider.flatMap { providerBaseURLs[$0] }
+        } else if let active = activeProvider, let url = providerBaseURLs[active] {
             baseURL = url
         } else {
             baseURL = providerBaseURLs.values.first
@@ -532,7 +637,10 @@ final class CodexConfigManager {
             }
             if skippingTable { continue }
             if currentHeader == nil,
-               isTopLevelKey(trimmed, key: "model") || isTopLevelKey(trimmed, key: "model_provider") {
+               isTopLevelKey(trimmed, key: "model")
+                || isTopLevelKey(trimmed, key: "model_provider")
+                || isTopLevelKey(trimmed, key: "openai_base_url")
+                || isTopLevelKey(trimmed, key: "forced_login_method") {
                 continue
             }
             result.append(raw)
@@ -565,11 +673,15 @@ final class CodexConfigManager {
     // MARK: - ChatGPT Auth Stash
     // 账号身份（ChatGPT tokens / 用户自己的 API key）与节点身份（本地代理 client key）必须完全分开：
     // 激活时 live auth.json 只允许 apikey + OPENAI_API_KEY=<代理 client key>，其它登录只存在 .aiusage.bak。
-    // 同时把 OPENAI_BASE_URL / OPENAI_API_KEY 写入 ~/.codex/.env：ChatGPT 桌面端内置客户端会忽略
-    // 自定义 model_provider，空桩就会打到 api.openai.com 且不带 Bearer。
+    // 同时把 OPENAI_BASE_URL / OPENAI_API_KEY 写入 ~/.codex/.env，让桌面端与 CLI 都稳定命中
+    // 本地代理；auth.json 不能是空桩，否则 WebSocket 握手不会携带 Bearer。
 
     /// 暂存非代理身份（若有），并写入只含代理密钥的 live auth.json。
-    private func installProxyAuthIdentity(proxyAPIKey: String) throws {
+    private func installProxyAuthIdentity(
+        proxyAPIKey: String,
+        currentAPIIdentityIsManaged: Bool,
+        knownManagedAPIKeys: Set<String>
+    ) throws {
         if fileManager.fileExists(atPath: authPath) {
             let current: Data
             do {
@@ -581,7 +693,12 @@ final class CodexConfigManager {
             if isProxyAuthIdentity(current, proxyAPIKey: proxyAPIKey) {
                 return
             }
-            if shouldStashCurrentAuth(current, proxyAPIKey: proxyAPIKey) {
+            if shouldStashCurrentAuth(
+                current,
+                proxyAPIKey: proxyAPIKey,
+                currentAPIIdentityIsManaged: currentAPIIdentityIsManaged,
+                knownManagedAPIKeys: knownManagedAPIKeys
+            ) {
                 let updatingExistingBackup = fileManager.fileExists(atPath: authBackupPath)
                 do {
                     try current.write(to: URL(fileURLWithPath: authBackupPath), options: .atomic)
@@ -603,11 +720,15 @@ final class CodexConfigManager {
     /// 监视 ~/.codex：若 ChatGPT 桌面端把登录写回来，立刻再换成代理身份。
     private func stashChatGPTAuthIfNeeded() throws {
         guard let key = lastProxyAPIKey, !key.isEmpty else { return }
-        try installProxyAuthIdentity(proxyAPIKey: key)
+        try installProxyAuthIdentity(
+            proxyAPIKey: key,
+            currentAPIIdentityIsManaged: true,
+            knownManagedAPIKeys: [key]
+        )
     }
 
     /// 把暂存的账号 auth.json 搬回；没有备份则只在本进程确实写过代理桩时清掉它。
-    private func restoreChatGPTAuthFiles(wroteProxyIdentity: Bool) throws {
+    private func restoreChatGPTAuthFiles(knownProxyAPIKey: String?, wroteProxyIdentity: Bool) throws {
         if fileManager.fileExists(atPath: authBackupPath) {
             do {
                 let data = try Data(contentsOf: URL(fileURLWithPath: authBackupPath))
@@ -620,7 +741,7 @@ final class CodexConfigManager {
             }
             return
         }
-        if wroteProxyIdentity, try liveAuthIsProxyStub() {
+        if wroteProxyIdentity, try liveAuthIsProxyStub(knownProxyAPIKey: knownProxyAPIKey) {
             try removeFileIfExists(at: authPath)
             codexConfigLog.info("Proxy auth.json stub removed (no account stash)")
         }
@@ -673,35 +794,25 @@ final class CodexConfigManager {
         }
     }
 
-    private func shouldStashCurrentAuth(_ data: Data, proxyAPIKey: String) -> Bool {
-        if isProxyAuthIdentity(data, proxyAPIKey: proxyAPIKey) { return false }
-        if isLeftoverAPIKeyStub(data) { return false }
-        return true
+    private func shouldStashCurrentAuth(
+        _ data: Data,
+        proxyAPIKey: String,
+        currentAPIIdentityIsManaged: Bool,
+        knownManagedAPIKeys: Set<String>
+    ) -> Bool {
+        CodexProxyAuthIdentityPolicy.shouldStashCurrentAuth(
+            data,
+            targetProxyAPIKey: proxyAPIKey,
+            knownManagedAPIKeys: knownManagedAPIKeys,
+            managedStateExists: currentAPIIdentityIsManaged
+        )
     }
 
     private func isProxyAuthIdentity(_ data: Data, proxyAPIKey: String) -> Bool {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return false
-        }
-        if authLooksLikeChatGPTLogin(data) { return false }
-        let mode = (object["auth_mode"] as? String)?.lowercased()
-        let key = object["OPENAI_API_KEY"] as? String
-        return mode == "apikey" && key == proxyAPIKey
+        CodexProxyAuthIdentityPolicy.classify(data) == .apiKey(proxyAPIKey)
     }
 
-    /// 旧版激活留下的空 apikey 桩，不是账号身份，不要当成备份。
-    private func isLeftoverAPIKeyStub(_ data: Data) -> Bool {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return false
-        }
-        if authLooksLikeChatGPTLogin(data) { return false }
-        let mode = (object["auth_mode"] as? String)?.lowercased()
-        guard mode == "apikey" else { return false }
-        let key = (object["OPENAI_API_KEY"] as? String) ?? ""
-        return key.isEmpty
-    }
-
-    private func liveAuthIsProxyStub() throws -> Bool {
+    private func liveAuthIsProxyStub(knownProxyAPIKey: String?) throws -> Bool {
         guard fileManager.fileExists(atPath: authPath) else { return false }
         let data: Data
         do {
@@ -710,24 +821,18 @@ final class CodexConfigManager {
             codexConfigLog.error("Failed to inspect Codex auth.json: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.unreadableManagedFile("auth.json")
         }
-        if authLooksLikeChatGPTLogin(data) { return false }
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        switch CodexProxyAuthIdentityPolicy.classify(data) {
+        case .apiKey(let key):
+            if let knownProxyAPIKey { return key == knownProxyAPIKey }
+            // 仅用于兼容 auth 已写入但 .env 尚未落盘的旧版崩溃窗口。
+            return true
+        case .chatGPT, .other:
             return false
         }
-        return (object["auth_mode"] as? String)?.lowercased() == "apikey"
     }
 
     private func authLooksLikeChatGPTLogin(_ data: Data) -> Bool {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return false
-        }
-        if (object["auth_mode"] as? String)?.lowercased() == "chatgpt" {
-            return true
-        }
-        guard let tokens = object["tokens"] as? [String: Any] else { return false }
-        let refresh = tokens["refresh_token"] as? String
-        let access = tokens["access_token"] as? String
-        return !(refresh ?? "").isEmpty || !(access ?? "").isEmpty
+        CodexProxyAuthIdentityPolicy.classify(data) == .chatGPT
     }
 
     // MARK: - Helpers
@@ -740,22 +845,41 @@ final class CodexConfigManager {
             || isTopLevelKey(trimmed, key: "openai_base_url")
     }
 
-    private func managedProviderTable(
-        id: String,
-        displayName: String,
-        baseURL: String,
-        bearerToken: String
-    ) -> [String] {
-        [
-            "[model_providers.\(id)]",
-            "name = \(tomlString(displayName))",
-            "base_url = \(tomlString(baseURL))",
-            "wire_api = \(tomlString("responses"))",
-            "requires_openai_auth = false",
-            "supports_websockets = false",
-            "experimental_bearer_token = \(tomlString(bearerToken))",
-            "env_key = \(tomlString("OPENAI_API_KEY"))",
+    /// 最后一层运行时不变量：AIUsage 代理配置只能引用永久存在的内置 provider，且身份与路由键
+    /// 各出现一次。未来若合并逻辑回归到临时 provider，会在覆盖用户文件前失败。
+    private func validateManagedConfig(_ content: String, expectedBaseURL: String) -> Bool {
+        var values: [String: [String]] = [:]
+        var reachedTable = false
+        var containsManagedProviderTable = false
+        let managedProviderHeaders = [
+            "model_providers.\(CodexSessionProviderMigrator.legacyAIUsageProvider)",
+            "model_providers.\(Self.providerId)",
         ]
+
+        for raw in content.components(separatedBy: "\n") {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                reachedTable = true
+                let header = normalizedTableHeader(trimmed)
+                if managedProviderHeaders.contains(where: { managed in
+                    header == managed || header.hasPrefix("\(managed).")
+                }) {
+                    containsManagedProviderTable = true
+                }
+                continue
+            }
+            guard !reachedTable,
+                  let key = topLevelKeyName(of: trimmed),
+                  ["model_provider", "forced_login_method", "openai_base_url"].contains(key),
+                  let value = tomlInlineStringValue(of: trimmed) else { continue }
+            values[key, default: []].append(value)
+        }
+
+        return content.contains(Self.headerBegin)
+            && !containsManagedProviderTable
+            && values["model_provider"] == [Self.providerId]
+            && values["forced_login_method"] == ["api"]
+            && values["openai_base_url"] == [expectedBaseURL]
     }
 
     /// 判断某行是否为指定顶层 key 的赋值（精确匹配，避免误伤 model_reasoning_effort 等）。

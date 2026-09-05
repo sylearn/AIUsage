@@ -27,8 +27,8 @@ extension CodexCostProvider {
         "codex-mini-latest"
     ]
 
-    func scanCacheSignature() -> String {
-        "\(Self.scanCacheSchemaVersion):\(Self.knownModels.sorted().joined(separator: ","))"
+    func scanCacheSignature(routingSignature: String = "") -> String {
+        "\(Self.scanCacheSchemaVersion):\(Self.knownModels.sorted().joined(separator: ",")):\(routingSignature)"
     }
 
     func normalizeModel(_ raw: String) -> String {
@@ -55,10 +55,10 @@ extension CodexCostProvider {
     // MARK: - Source Tagging
 
     /// 按来源给模型名打标签，区分代理 / 非代理。
-    ///   - model_provider == "aiusage-proxy": 走代理归档计费，JSONL 行丢弃避免双计。
+    ///   - 旧 model_provider == "aiusage-proxy": 走代理归档计费，JSONL 行丢弃避免双计。
     ///   - 其它 Codex JSONL: 归入非代理轨，只统计 token，不估价，也不依赖 rate_limits。
     func sourceTaggedModel(_ baseModel: String, provider: String?) -> String? {
-        if provider == CodexProvider.proxyProviderId {
+        if provider == CodexProvider.legacyProxyProviderId {
             return nil
         }
         return "\(baseModel)\(Self.nonProxySourceSuffix)"

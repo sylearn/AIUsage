@@ -639,7 +639,7 @@ final class GlobalProxyManager: ObservableObject {
                 nodeName: selectedNode.name
             )
             config.activeNodeId = nodeId
-            if track == .codex || (track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog) {
+            if track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
                 try adapter.activateCLIConfig(config)
             }
             guard persist() else {
@@ -654,7 +654,7 @@ final class GlobalProxyManager: ObservableObject {
                         nodeName: previousNode.name
                     )
                 }
-                if track == .codex || (track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog) {
+                if track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
                     try? adapter.activateCLIConfig(config)
                 }
                 throw GlobalProxyRuntimeError.startFailed("failed to save Gateway route")
@@ -681,7 +681,7 @@ final class GlobalProxyManager: ObservableObject {
                     nodeName: previousNode.name
                 )
             }
-            if track == .codex || (track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog) {
+            if track == .claude && config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
                 try? adapter.activateCLIConfig(config)
             }
             if acquiredNewLease, let consumer = nodeRuntimeConsumer {

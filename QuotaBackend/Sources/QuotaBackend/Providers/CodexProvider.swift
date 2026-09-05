@@ -17,9 +17,8 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     static let refreshURL = "https://auth.openai.com/oauth/token"
     static let oauthClientId = "app_EMoamEEZ73f0CkXaXp7hrann"
     static let defaultBaseURL = "https://chatgpt.com/backend-api/"
-    /// Provider id of the AIUsage-managed Codex proxy block in `config.toml`.
-    /// Must mirror `CodexConfigManager.providerId` in the app target.
-    static let proxyProviderId = "aiusage-proxy"
+    /// 旧版 AIUsage 写入会话的 provider id；仅用于迁移期间兼容既有 JSONL。
+    static let legacyProxyProviderId = CodexSessionProviderMigrator.legacyAIUsageProvider
 
     public var supportedAuthMethods: [AuthMethod] { [.token, .authFile, .auto] }
 

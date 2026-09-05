@@ -287,6 +287,211 @@ final class CodexCostProviderTests: XCTestCase {
         XCTAssertEqual(summary.costSummary?.modelBreakdownOverall?.first?.model, "gpt-5.4 (Non-Proxy)")
     }
 
+    func testSameOpenAIThreadCanMixAccountAndProxyWithoutDoubleCounting() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let day = utcDayKey(now)
+        let timestamp = SharedFormatters.iso8601String(from: now)
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": timestamp, "payload": [
+                "id": "mixed-session", "model_provider": "openai",
+            ]],
+            ["type": "turn_context", "timestamp": timestamp, "payload": ["model": "gpt-5.4"]],
+            tokenCountLine(timestamp, input: 160, cached: 40, output: 50),
+        ], to: sessionDir.appendingPathComponent("mixed-session.jsonl"))
+        try writeProxyApiArchive(home: tempRoot, days: [
+            day: ["gpt-5.4": [
+                "inputTokens": 30, "outputTokens": 20,
+                "cacheReadTokens": 10, "cacheCreateTokens": 0,
+                "costUSD": 0.25, "requests": 1,
+                "sessions": [
+                    "mixed-session": [
+                        "gpt-5.4": [
+                            "inputTokens": 30, "outputTokens": 20,
+                            "cacheReadTokens": 10, "cacheCreateTokens": 0,
+                        ],
+                    ],
+                ],
+            ]],
+        ])
+
+        let provider = makeProvider(home: tempRoot)
+        let usage = try await provider.fetchUsage()
+        let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(extraInt(usage, "overall.proxy.totalTokens"), 60)
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 150)
+        XCTAssertEqual(summary.costSummary?.overall?.tokens, 210)
+        let models = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall)
+        let account = try XCTUnwrap(models.first { $0.model == "gpt-5.4 (Non-Proxy)" })
+        XCTAssertEqual(account.inputTokens, 90)
+        XCTAssertEqual(account.cacheReadTokens, 30)
+        XCTAssertEqual(account.outputTokens, 30)
+    }
+
+    func testProxyCoverageChangeInvalidatesUnchangedJSONLCache() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let day = utcDayKey(now)
+        let timestamp = SharedFormatters.iso8601String(from: now)
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": timestamp, "payload": [
+                "id": "cache-session", "model_provider": "openai",
+            ]],
+            ["type": "turn_context", "timestamp": timestamp, "payload": ["model": "gpt-5.4"]],
+            tokenCountLine(timestamp, input: 100, cached: 0, output: 20),
+        ], to: sessionDir.appendingPathComponent("cache-session.jsonl"))
+
+        let provider = makeProvider(home: tempRoot)
+        let first = try await provider.fetchUsage()
+        XCTAssertEqual(extraInt(first, "overall.nonProxy.totalTokens"), 120)
+
+        try writeProxyApiArchive(home: tempRoot, days: [
+            day: ["gpt-5.4": [
+                "inputTokens": 30, "outputTokens": 20,
+                "cacheReadTokens": 0, "cacheCreateTokens": 0,
+                "costUSD": 0.1, "requests": 1,
+                "sessions": [
+                    "cache-session": [
+                        "gpt-5.4": [
+                            "inputTokens": 30, "outputTokens": 20,
+                            "cacheReadTokens": 0, "cacheCreateTokens": 0,
+                        ],
+                    ],
+                ],
+            ]],
+        ])
+
+        let second = try await provider.fetchUsage()
+        XCTAssertEqual(extraInt(second, "overall.proxy.totalTokens"), 50)
+        XCTAssertEqual(extraInt(second, "overall.nonProxy.totalTokens"), 70)
+        XCTAssertEqual(extraInt(second, "overall.totalTokens"), 120)
+    }
+
+    func testMigratedLegacyProxySessionKeepsHistoricalRowsOutOfNonProxyTrack() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date().addingTimeInterval(-60)
+        let day = utcDayKey(now)
+        let timestamp = SharedFormatters.iso8601String(from: now)
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": timestamp, "payload": [
+                "id": "legacy-proxy-session", "model_provider": "aiusage-proxy",
+            ]],
+            ["type": "turn_context", "timestamp": timestamp, "payload": ["model": "gpt-5.4"]],
+            tokenCountLine(timestamp, input: 100, cached: 10, output: 20),
+        ], to: sessionDir.appendingPathComponent("legacy-proxy-session.jsonl"))
+        try writeProxyApiArchive(home: tempRoot, days: [
+            day: ["gpt-5.4": [
+                "inputTokens": 90, "outputTokens": 20,
+                "cacheReadTokens": 10, "cacheCreateTokens": 0,
+                "costUSD": 0.2, "requests": 1,
+            ]],
+        ])
+
+        XCTAssertEqual(
+            try CodexSessionProviderMigrator.migrate(homeDirectory: tempRoot.path).migratedFiles,
+            1
+        )
+        let provider = makeProvider(home: tempRoot)
+        let usage = try await provider.fetchUsage()
+
+        XCTAssertEqual(extraInt(usage, "overall.proxy.totalTokens"), 120)
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 0)
+        XCTAssertEqual(extraInt(usage, "overall.totalTokens"), 120)
+    }
+
+    func testMigratedThreadCanContinueWithProxyThenAccountWithoutHistoricalDoubleCount() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let beforeMigration = Date().addingTimeInterval(-1)
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: beforeMigration)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let rollout = sessionDir.appendingPathComponent("legacy-then-mixed.jsonl")
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": SharedFormatters.iso8601String(from: beforeMigration), "payload": [
+                "id": "legacy-then-mixed", "model_provider": "aiusage-proxy",
+            ]],
+            ["type": "turn_context", "timestamp": SharedFormatters.iso8601String(from: beforeMigration), "payload": ["model": "gpt-5.4"]],
+            tokenCountLine(
+                SharedFormatters.iso8601String(from: beforeMigration),
+                input: 100,
+                cached: 10,
+                output: 20
+            ),
+        ], to: rollout)
+
+        XCTAssertEqual(
+            try CodexSessionProviderMigrator.migrate(homeDirectory: tempRoot.path).migratedFiles,
+            1
+        )
+
+        let proxyTurn = Date().addingTimeInterval(1)
+        let accountTurn = Date().addingTimeInterval(2)
+        try appendJSONLines([
+            tokenCountLine(
+                SharedFormatters.iso8601String(from: proxyTurn),
+                input: 160,
+                cached: 20,
+                output: 30
+            ),
+            tokenCountLine(
+                SharedFormatters.iso8601String(from: accountTurn),
+                input: 210,
+                cached: 20,
+                output: 50
+            ),
+        ], to: rollout)
+
+        var archiveDays: [String: [String: [String: Any]]] = [:]
+        func addProxyCoverage(day: String, input: Int, cached: Int, output: Int) {
+            var model = archiveDays[day]?["gpt-5.4"] ?? [
+                "inputTokens": 0, "outputTokens": 0,
+                "cacheReadTokens": 0, "cacheCreateTokens": 0,
+                "costUSD": 0.0, "requests": 0,
+                "sessions": [String: Any](),
+            ]
+            model["inputTokens"] = (model["inputTokens"] as? Int ?? 0) + input
+            model["outputTokens"] = (model["outputTokens"] as? Int ?? 0) + output
+            model["cacheReadTokens"] = (model["cacheReadTokens"] as? Int ?? 0) + cached
+            model["requests"] = (model["requests"] as? Int ?? 0) + 1
+            var sessions = model["sessions"] as? [String: Any] ?? [:]
+            var models = sessions["legacy-then-mixed"] as? [String: Any] ?? [:]
+            var usage = models["gpt-5.4"] as? [String: Any] ?? [
+                "inputTokens": 0, "outputTokens": 0,
+                "cacheReadTokens": 0, "cacheCreateTokens": 0,
+            ]
+            usage["inputTokens"] = (usage["inputTokens"] as? Int ?? 0) + input
+            usage["outputTokens"] = (usage["outputTokens"] as? Int ?? 0) + output
+            usage["cacheReadTokens"] = (usage["cacheReadTokens"] as? Int ?? 0) + cached
+            models["gpt-5.4"] = usage
+            sessions["legacy-then-mixed"] = models
+            model["sessions"] = sessions
+            archiveDays[day, default: [:]]["gpt-5.4"] = model
+        }
+        // 迁移前一轮与迁移后的首轮均走代理；最后一轮切回账号。
+        addProxyCoverage(day: utcDayKey(beforeMigration), input: 90, cached: 10, output: 20)
+        addProxyCoverage(day: utcDayKey(proxyTurn), input: 50, cached: 10, output: 10)
+        try writeProxyApiArchive(home: tempRoot, days: archiveDays)
+
+        let usage = try await makeProvider(home: tempRoot).fetchUsage()
+        XCTAssertEqual(extraInt(usage, "overall.proxy.totalTokens"), 190)
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 70)
+        XCTAssertEqual(extraInt(usage, "overall.totalTokens"), 260)
+    }
+
     // MARK: - 代理轨：读代理归档 + 与非代理轨合并
 
     func testProxyTrackFromArchiveMergesWithNonProxyTrack() async throws {
@@ -630,6 +835,17 @@ final class CodexCostProviderTests: XCTestCase {
             return String(data: data, encoding: .utf8)!
         }
         try lines.joined(separator: "\n").appending("\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func appendJSONLines(_ objects: [[String: Any]], to url: URL) throws {
+        let lines = try objects.map { object -> String in
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            return String(data: data, encoding: .utf8)!
+        }
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(lines.joined(separator: "\n").appending("\n").utf8))
     }
 
     private func writeProxyApiArchive(home: URL, days: [String: [String: [String: Any]]]) throws {

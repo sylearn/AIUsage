@@ -814,6 +814,12 @@ struct ProxyRequestLog: Codable, Identifiable {
     let errorMessage: String?
     let errorType: String?
     let statusCode: Int?
+    /// Codex 请求携带的本地会话标识。用于把同一对话中的代理 token 从 JSONL 非代理轨精确扣除。
+    let sessionId: String?
+    /// Codex 的 thread/conversation 标识；与 sessionId 同时保留用于跨版本兼容匹配。
+    let conversationId: String?
+    /// 上游返回的请求标识，仅用于排障与将来更细粒度关联。
+    let upstreamRequestId: String?
     /// 发起请求的 Claude 产品面。后端根据专用 header / 监听入口识别，旧日志为 nil。
     /// 原始值与 QuotaBackend.ClaudeClientSurface 保持一致：
     /// `claude_code` / `claude_desktop` / `claude_science` / `unknown`。
@@ -847,6 +853,9 @@ struct ProxyRequestLog: Codable, Identifiable {
         errorMessage: String? = nil,
         errorType: String? = nil,
         statusCode: Int? = nil,
+        sessionId: String? = nil,
+        conversationId: String? = nil,
+        upstreamRequestId: String? = nil,
         clientSurface: String? = nil,
         isGlobalProxy: Bool = false
     ) {
@@ -869,6 +878,9 @@ struct ProxyRequestLog: Codable, Identifiable {
         self.errorMessage = errorMessage
         self.errorType = errorType
         self.statusCode = statusCode
+        self.sessionId = sessionId
+        self.conversationId = conversationId
+        self.upstreamRequestId = upstreamRequestId
         self.clientSurface = clientSurface
         self.isGlobalProxy = isGlobalProxy
     }
@@ -894,6 +906,9 @@ struct ProxyRequestLog: Codable, Identifiable {
         case errorMessage
         case errorType
         case statusCode
+        case sessionId
+        case conversationId
+        case upstreamRequestId
         case clientSurface
         case isGlobalProxy
     }
@@ -929,6 +944,9 @@ struct ProxyRequestLog: Codable, Identifiable {
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         errorType = try c.decodeIfPresent(String.self, forKey: .errorType)
         statusCode = try c.decodeIfPresent(Int.self, forKey: .statusCode)
+        sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
+        conversationId = try c.decodeIfPresent(String.self, forKey: .conversationId)
+        upstreamRequestId = try c.decodeIfPresent(String.self, forKey: .upstreamRequestId)
         clientSurface = try c.decodeIfPresent(String.self, forKey: .clientSurface)
         isGlobalProxy = try c.decodeIfPresent(Bool.self, forKey: .isGlobalProxy) ?? false
     }
@@ -955,6 +973,9 @@ struct ProxyRequestLog: Codable, Identifiable {
         try c.encodeIfPresent(errorMessage, forKey: .errorMessage)
         try c.encodeIfPresent(errorType, forKey: .errorType)
         try c.encodeIfPresent(statusCode, forKey: .statusCode)
+        try c.encodeIfPresent(sessionId, forKey: .sessionId)
+        try c.encodeIfPresent(conversationId, forKey: .conversationId)
+        try c.encodeIfPresent(upstreamRequestId, forKey: .upstreamRequestId)
         try c.encodeIfPresent(clientSurface, forKey: .clientSurface)
         if isGlobalProxy { try c.encode(isGlobalProxy, forKey: .isGlobalProxy) }
     }

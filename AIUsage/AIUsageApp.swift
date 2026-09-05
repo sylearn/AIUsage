@@ -224,6 +224,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        do {
+            let report = try CodexConfigManager.shared.migrateLegacySessionsIfNeeded()
+            if report.migratedFiles > 0 {
+                appDelegateLog.info("Migrated \(report.migratedFiles, privacy: .public) legacy Codex session provider records")
+            }
+        } catch {
+            // 激活/还原路径会再次尝试并向界面返回错误；启动本身不因单个会话文件异常而崩溃。
+            appDelegateLog.error("Failed to migrate legacy Codex sessions: \(String(describing: error), privacy: .public)")
+        }
+
         setupMenuBar()
         requestNotificationPermission()
 

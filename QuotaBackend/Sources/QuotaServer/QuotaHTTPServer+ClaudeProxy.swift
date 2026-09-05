@@ -815,6 +815,9 @@ extension QuotaHTTPServer {
         errorType: String? = nil,
         statusCode: Int? = nil,
         nodeId: String? = nil,
+        sessionId: String? = nil,
+        conversationId: String? = nil,
+        upstreamRequestId: String? = nil,
         clientSurface: ClaudeClientSurface = .unknown
     ) {
         var parts = [
@@ -845,6 +848,15 @@ extension QuotaHTTPServer {
         // （宿主 App 解析时优先用 node_id 而非进程 configId）。
         if let nodeId, !nodeId.isEmpty {
             parts.append("\"node_id\":\(escapeJSON(nodeId))")
+        }
+        if let sessionId, !sessionId.isEmpty {
+            parts.append("\"session_id\":\(escapeJSON(sessionId))")
+        }
+        if let conversationId, !conversationId.isEmpty {
+            parts.append("\"conversation_id\":\(escapeJSON(conversationId))")
+        }
+        if let upstreamRequestId, !upstreamRequestId.isEmpty {
+            parts.append("\"upstream_request_id\":\(escapeJSON(upstreamRequestId))")
         }
         parts.append("\"client_surface\":\(escapeJSON(clientSurface.rawValue))")
         // stdout is parsed by the macOS host app for structured log ingestion

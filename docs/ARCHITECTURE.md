@@ -21,7 +21,7 @@ AIUsage/
 │   ├── APIService.swift          # HTTP client for remote QuotaServer
 │   ├── SecureAccountVault.swift  # Account registry; folded into AccountCredentialStore's single keychain item (one-time migration)
 │   ├── SystemProxyDetector.swift # Detects macOS system proxy (Codex no_proxy fix)
-│   ├── CodexNoProxyFixer.swift   # Writes/removes managed no_proxy block in ~/.codex/.env
+│   ├── CodexNoProxyFixer.swift   # Writes/removes managed route, API identity, and no_proxy block in ~/.codex/.env
 │   ├── CLIProxyBinaryStore.swift # Versioned official CPA install, validation, activation and rollback
 │   ├── CLIProxyConfigStore.swift # Surgical config merge that preserves CPA/user-owned fields
 │   ├── CLIProxyManagementClient.swift # Typed loopback Management API and public model transport
@@ -245,7 +245,7 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 2. `ProxyViewModel` executes transactional activation:
    - Loads full settings from `NodeProfileStore` profile (v0.5.0+) or legacy `ProxyConfiguration`
    - **Claude track**: writes complete `~/.claude/settings.json` via `ClaudeSettingsManager.writeFullSettings()` (auto-backup to `settings.backup.json`)
-   - **Codex track**: spawns `QuotaServer(PROXY_TARGET=codex)`, then injects managed block into `~/.codex/config.toml` (backup-as-source-of-truth); if a system proxy is detected, writes `no_proxy` into `~/.codex/.env`
+   - **Codex track**: spawns `QuotaServer(PROXY_TARGET=codex)`, then injects `model_provider = "openai"` + `forced_login_method = "api"` + local `openai_base_url` into `~/.codex/config.toml`; the ChatGPT identity is stashed while a proxy-only `auth.json` and `.env` block route the client to QuotaServer
    - Spawns `QuotaServer` process (via `ProxyRuntimeService`)
    - Persists `activatedConfigId` / `activatedCodexConfigId` only after all steps succeed
 3. Pipes stdout/stderr, parses `PROXY_LOG:` JSON lines for stats. Stats ingestion is main-thread-light:
@@ -272,15 +272,17 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 | `~/.config/aiusage/proxy-logs/proxy-logs-YYYY-MM-DD.json` | Short-retention proxy request log shards |
 | `~/.config/aiusage/usage-archive/proxy-usage-claude-v1.json` | Claude proxy daily usage archive; token/cost fields are frozen when requests are logged |
 | `~/.config/aiusage/usage-archive/proxy-usage-codex-v1.json` | Codex proxy daily usage archive; same frozen-cost semantics |
-| `~/.codex/config.toml` | Codex configuration; managed `model_provider=aiusage-proxy` block injected on activation (chmod 0600) |
+| `~/.codex/config.toml` | Codex configuration; activation keeps the permanent built-in `openai` provider and injects managed `forced_login_method=api` + local `openai_base_url` routing (chmod 0600) |
 | `~/.codex/config.toml.aiusage.bak` | Backup of `config.toml` before injection (backup-as-source-of-truth; removed on restore) |
+| `~/.codex/auth.json` / `~/.codex/auth.json.aiusage.bak` | Live proxy-only API identity / stashed ChatGPT account identity; restored transactionally on deactivation |
 | `$XDG_CONFIG_HOME/opencode/config.json`、`opencode.json`、`opencode.jsonc`（默认 `~/.config/opencode/`） | OpenCode 全局配置层；三者按顺序深合并。AIUsage 只管理最高优先级的专用 `opencode.json[c]` 层，`config.json` 只读；编辑器保持 JSONC 注释与排版 |
 | `~/.config/aiusage/opencode-takeover.json` + `opencode-takeover-backup/` | Durable takeover session：固定目标路径、原文快照、哈希、权限和恢复状态；外部修改时 fail-closed，用户明确选择后才接受或丢弃 |
-| `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
+| `~/.codex/.env` | Managed local `OPENAI_BASE_URL`, proxy client key, and optional loopback `no_proxy`; removed on deactivation |
 | `~/Library/Application Support/AIUsage/CLIProxyAPI/` | CPA versioned binaries, `current` symlink, preserved `config.yaml`, auth directory, stable plugin data, settings and account-sync manifest. Duplicate-auth rollback payloads are memory-only; no second token-bearing backup directory is created. |
 | `~/Library/Application Support/AIUsage/CLIProxyAPI/account-sync-manifest.json` | Mode, file linkage, optional provider-prefixed native-identity digest, timestamps and one-way content fingerprints; never credential JSON or token material. Existing v1 records without native identity remain readable. |
 | **Keychain** (`CLIProxySecretStore`) | Separate CPA client and management keys; management key is never displayed or reused as a client credential |
-| `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex non-proxy session logs (read-only token source for CodexCostProvider; overridable via `$CODEX_HOME`) |
+| `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex mixed account/API session logs; proxy archive coverage is subtracted before the remainder enters the non-proxy token track (overridable via `$CODEX_HOME`) |
+| `~/.config/aiusage/codex-session-provider-migration-v1.json` | Journal/cutoff map for the one-time in-place migration of AIUsage-owned `aiusage-proxy` rollout metadata to built-in `openai` |
 | `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |
 | `~/.config/aiusage/usage-archive/codex-non-proxy-usage-v*.json` | CodexNonProxyUsageArchiveStore — frozen per-day non-proxy token totals; today is recomputed, previous days are immutable |
 | `~/.config/aiusage/usage-archive/codex-subscription-usage-v*.json` | Legacy Codex non-proxy archive path; read once and migrated to `codex-non-proxy-usage-v*.json` |

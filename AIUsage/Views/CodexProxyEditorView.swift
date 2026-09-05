@@ -3,7 +3,7 @@ import QuotaBackend
 
 // MARK: - Codex Proxy Editor
 // Codex 节点编辑器（单模型）。把 OpenAI 兼容上游接入 Codex：激活时写 ~/.codex/config.toml
-// 的 model / model_provider=aiusage-proxy + [model_providers.aiusage-proxy]，本地起 QuotaServer。
+// 的 model / 内置 openai provider + openai_base_url，API 身份与 ChatGPT 登录隔离，本地起 QuotaServer。
 // 单模型写入 modelMapping.bigModel；可用目录与可选费用规则独立保存。
 
 struct CodexProxyEditorView: View {
@@ -135,8 +135,8 @@ struct CodexProxyEditorView: View {
         HStack(spacing: 8) {
             Image(systemName: "info.circle.fill").foregroundStyle(Self.codexBrand)
             Text(L(
-                "When activated, AIUsage injects model_provider=aiusage-proxy into ~/.codex/config.toml and starts a local proxy. Codex then reaches your OpenAI-compatible upstream through it (Responses inbound).",
-                "激活时会向 ~/.codex/config.toml 注入 model_provider=aiusage-proxy 并启动本地代理，Codex 经由它访问你的 OpenAI 兼容上游（Responses 入站）。"
+                "When activated, AIUsage keeps Codex on the built-in OpenAI provider, points openai_base_url to a local proxy, and isolates API credentials from your ChatGPT login. Your account status returns after proxy mode is disabled.",
+                "激活时 AIUsage 保持 Codex 使用内置 OpenAI provider，通过 openai_base_url 指向本地代理，并将 API 凭据与 ChatGPT 登录隔离；停用代理后会恢复原账号状态。"
             ))
             .font(.caption2).foregroundStyle(.secondary)
         }
@@ -341,8 +341,8 @@ struct CodexProxyEditorView: View {
             }
             HStack(spacing: 6) {
                 Image(systemName: "lock.shield.fill").foregroundStyle(.green)
-                Text(L("Sent to the local proxy via config.toml experimental_bearer_token. Leave empty to use \"proxy-key\".",
-                       "通过 config.toml 的 experimental_bearer_token 下发给本地代理。留空则使用 \"proxy-key\"。"))
+                Text(L("Stored in the proxy-only Codex API identity and checked by the local proxy. Leave empty to use \"proxy-key\".",
+                       "写入 Codex 的代理专用 API 身份，并由本地代理校验。留空则使用 \"proxy-key\"。"))
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }

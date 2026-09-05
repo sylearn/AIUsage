@@ -45,9 +45,9 @@ final class CodexProviderUsageURLTests: XCTestCase {
 
     func testUsageURLIgnoresAIUsageProxyProvider() throws {
         try writeConfig("""
-        model_provider = "\(CodexProvider.proxyProviderId)"
+        model_provider = "\(CodexProvider.legacyProxyProviderId)"
 
-        [model_providers.\(CodexProvider.proxyProviderId)]
+        [model_providers.\(CodexProvider.legacyProxyProviderId)]
         base_url = "http://127.0.0.1:4319/v1"
         wire_api = "responses"
         """)

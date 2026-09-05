@@ -711,12 +711,13 @@ usage 走**旁路解析**（非流式读响应体顶层 `usage`，流式读 `res
 
 `CodexConfigManager`（App 侧，`~/.codex/config.toml`）：
 
-- 激活时注入三段**受管理 sentinel 块**（纯字符串处理，不引入 TOML 第三方库）：
-  - **HEADER 块**：顶层 `model` / `model_provider = aiusage-proxy`；
+- 激活时注入两类**受管理 sentinel 块**（纯字符串处理，不引入 TOML 第三方库）：
+  - **HEADER 块**：顶层 `model`、`model_provider = "openai"`、`forced_login_method = "api"`、`openai_base_url = "http://host:port/v1"`；账号与 API 始终使用 Codex 内置 `openai` provider，因此会话不会引用停用后消失的临时 provider；
   - **BASE 块（通用配置基底，可选）**：把「通用配置」`CodexGlobalConfig.tomlText` 与节点 `ProxySettings.extraTOML` 按**顶层键合并**后注入（**节点键覆盖全局同名键 / 同名表头**），顶层 key 与 `[table]` 分别归位，避免重复键报错；
-  - **PROVIDER 块**：`[model_providers.aiusage-proxy]`（`base_url = http://host:port/v1`、`wire_api = "responses"`、`experimental_bearer_token = <clientKey>`）。
-- 注入前会从用户原文里剥离与 BASE 块冲突的顶层键与表段，再按「HEADER → BASE 顶层键 → 清理后的用户正文 → BASE 表段 → PROVIDER」重新组装，保证 TOML 结构合法。
+  - **不创建自定义 provider**：旧 `[model_providers.aiusage-proxy]` 表及其引用会被定向清理，其它工具/用户创建的 provider 保持原样。
+- 注入前会从用户原文里剥离与 HEADER/BASE 冲突的顶层键与表段，再按「HEADER → BASE 顶层键 → 清理后的用户正文 → BASE 表段」重新组装；写盘前校验 provider、登录方式和 base URL 三项运行时不变量，失败则整组文件回滚。
 - **备份即真相源**：激活前把干净原文备份到 `config.toml.aiusage.bak`，保证重复激活幂等；停用整文还原并删除备份。
+- **旧会话迁移**：应用启动时只把 AIUsage 历史写入的 `session_meta.model_provider = "aiusage-proxy"` 原位改为 `"openai"`，保持 JSONL 文件大小与后续偏移不变；迁移 journal 记录时间截点，用于继续排除迁移前已进入代理归档的 token。第三方 provider 不改写。
 - `config.toml` 可能含 token，写入后 `chmod 0600`。
 
 #### 双层配置模型（对齐 Claude Code）
@@ -733,7 +734,9 @@ Codex 与 Claude 一致采用「实时文件 + 受管理片段」双层心智，
 Codex CLI  ──Bearer <clientKey>──▶  本地代理(校验 expectedClientKey)  ──OPENAI_API_KEY──▶  上游
 ```
 
-`clientKey`（即 `effectiveClientKey`，留空回退 `"proxy-key"`）由 `config.toml` 的 `experimental_bearer_token` 下发给 Codex，本地代理据此校验；真实上游密钥仅存在于服务进程环境变量，不下发给 Codex。
+`clientKey`（即 `effectiveClientKey`，留空回退 `"proxy-key"`）写入代理态 `~/.codex/auth.json` 与受管理 `.env` 块，本地代理据此校验；原 ChatGPT `auth.json` 暂存于 `.aiusage.bak`，停用时恢复。节点换 key 时只把当前/上一把受管理 client key 识别为代理桩，用户新写入的 ChatGPT 或自有 API 身份仍会更新备份。真实上游密钥仅存在于服务进程环境变量，不下发给 Codex。`forced_login_method = "api"` 与代理专用身份共同阻止已登录 ChatGPT 时绕过代理消耗账号额度。
+
+因此代理启用期间 Codex 显示的是 API 身份；停用代理并切回账号模式后，原 ChatGPT 身份与账号状态会恢复。身份显示随当前路由切换，但任务仍使用永久存在的 `openai` provider，不发生会话隔离。
 
 ### 系统代理 no_proxy 自动修复
 
@@ -833,10 +836,10 @@ Codex 启动会 `GET /v1/models` 刷新模型列表。代理忠实转发上游�
 
 ### Codex（双轨，零重叠）
 
-Codex 会话日志 `session_meta.model_provider` 可区分来源：`aiusage-proxy` = 走代理，`openai`/空 = 非代理（订阅账号或第三方直连，见 `CodexCostProvider+Pricing.sourceTaggedModel`）。但它区分不出「哪个代理节点」（所有代理节点都写同一个 `aiusage-proxy`）。故：
+Codex 账号与 AIUsage API 现在都使用 `session_meta.model_provider = "openai"`，因此来源不能再按整条会话粗分。代理每个成功请求会把 Codex 的 `session-id` / `thread-id`（兼容旧下划线 header 与 `x-codex-turn-metadata` 回退）、日期、请求模型和 token 明细写入永久归档。统计扫描同一会话 JSONL 时按这些键逐项扣除代理覆盖，剩余部分才进入非代理轨：
 
-- **代理轨（Proxy）** = Codex 家族代理归档，按节点冻结价。JSONL 里的代理行丢弃，避免与代理归档重复计算。
-- **非代理轨（Non-Proxy）** = JSONL 非代理行，只统计 token，成本恒 0；今天重算、今天之前冻结进永久归档。非代理可能是 Codex 订阅账号，也可能是第三方直连，本项目不对它做 token 计费估算。
+- **代理轨（Proxy）** = Codex 家族代理归档，按节点冻结价；节点切换不改会话 provider。
+- **非代理轨（Non-Proxy）** = JSONL 总量减去同会话/日期/模型的代理 token 覆盖，只统计剩余 token，成本恒 0；因此同一个任务先用账号、再用 API、再切回账号也不会双计。旧 `aiusage-proxy` 会话在迁移时间截点前仍整段排除，保持历史统计口径。
 - 统计页：合计 / 代理 / 非代理三种口径。非代理轨隐藏费用 UI，仅展示 token。
 
 ### 持久化
@@ -846,6 +849,7 @@ Codex 会话日志 `session_meta.model_provider` 可区分来源：`aiusage-prox
 | `~/.config/aiusage/usage-archive/proxy-usage-claude-v1.json` | Claude 代理日志永久日归档（日→模型，冻结成本） |
 | `~/.config/aiusage/usage-archive/proxy-usage-codex-v1.json` | Codex 代理轨永久日归档（同上） |
 | `~/.config/aiusage/usage-archive/codex-non-proxy-usage-v1.json` | Codex 非代理轨永久日归档（token-only，今天重算，历史冻结） |
+| `~/.config/aiusage/codex-session-provider-migration-v1.json` | 旧 AIUsage provider 会话的迁移 journal 与历史代理截点 |
 | `~/.config/aiusage/proxy-logs/proxy-logs-YYYY-MM-DD.json` | 原始代理日志日分片（按保留期可裁剪，裁剪不影响上面的永久归档） |
 
 折叠语义为「整日替换」：保留期窗口内的日期每个持久化周期用 `recentLogs` 重算覆盖（幂等，冻结成本确定性求和），窗口外旧日期保持冻结值——杜绝刷新膨胀。`loadLogs` 在裁剪前先全量入档。

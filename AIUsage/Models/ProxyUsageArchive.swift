@@ -46,6 +46,21 @@ struct ProxyUsageSurfaceAgg: Codable, Sendable {
     }
 }
 
+/// Codex JSONL 去重所需的最小路由凭据。只保存 token，不参与代理总量求和。
+struct ProxyUsageSessionTokenAgg: Codable, Sendable {
+    var inputTokens: Int = 0
+    var outputTokens: Int = 0
+    var cacheReadTokens: Int = 0
+    var cacheCreateTokens: Int = 0
+
+    mutating func add(_ log: ProxyRequestLog) {
+        inputTokens += log.tokensInput
+        outputTokens += log.tokensOutput
+        cacheReadTokens += log.tokensCacheRead
+        cacheCreateTokens += log.tokensCacheCreation
+    }
+}
+
 struct ProxyUsageModelAgg: Codable, Sendable {
     var inputTokens: Int = 0
     var outputTokens: Int = 0
@@ -55,6 +70,8 @@ struct ProxyUsageModelAgg: Codable, Sendable {
     var requests: Int = 0
     var pricingResolvedRequests: Int = 0
     var surfaces: [String: ProxyUsageSurfaceAgg] = [:]
+    /// session/conversation id → Codex 请求模型 → token。用于同一会话混合账号与代理时去重。
+    var sessions: [String: [String: ProxyUsageSessionTokenAgg]] = [:]
 
     var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheCreateTokens }
 
@@ -66,7 +83,8 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         costUSD: Double = 0,
         requests: Int = 0,
         pricingResolvedRequests: Int = 0,
-        surfaces: [String: ProxyUsageSurfaceAgg] = [:]
+        surfaces: [String: ProxyUsageSurfaceAgg] = [:],
+        sessions: [String: [String: ProxyUsageSessionTokenAgg]] = [:]
     ) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -76,6 +94,7 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         self.requests = requests
         self.pricingResolvedRequests = pricingResolvedRequests
         self.surfaces = surfaces
+        self.sessions = sessions
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -87,6 +106,7 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         case requests
         case pricingResolvedRequests
         case surfaces
+        case sessions
     }
 
     init(from decoder: Decoder) throws {
@@ -100,6 +120,10 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         pricingResolvedRequests = try c.decodeIfPresent(Int.self, forKey: .pricingResolvedRequests)
             ?? (costUSD > 0 ? requests : 0)
         surfaces = try c.decodeIfPresent([String: ProxyUsageSurfaceAgg].self, forKey: .surfaces) ?? [:]
+        sessions = try c.decodeIfPresent(
+            [String: [String: ProxyUsageSessionTokenAgg]].self,
+            forKey: .sessions
+        ) ?? [:]
     }
 
     mutating func add(_ log: ProxyRequestLog) {
@@ -116,6 +140,16 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         var surfaceAgg = surfaces[surface] ?? ProxyUsageSurfaceAgg()
         surfaceAgg.add(log)
         surfaces[surface] = surfaceAgg
+
+        let requestedModel = log.claudeModel.nilIfBlank ?? log.upstreamModel
+        let identifiers = Set([log.sessionId, log.conversationId].compactMap { $0?.nilIfBlank })
+        for identifier in identifiers {
+            var models = sessions[identifier] ?? [:]
+            var usage = models[requestedModel] ?? ProxyUsageSessionTokenAgg()
+            usage.add(log)
+            models[requestedModel] = usage
+            sessions[identifier] = models
+        }
     }
 }
 

@@ -41,6 +41,13 @@ enum CodexNoProxyFixer {
         return (home as NSString).appendingPathComponent(".codex/.env")
     }
 
+    /// 上一次成功写入托管块的 client key。用于区分“旧节点代理桩”和用户自己的 API 身份；
+    /// 读取失败返回 nil，真正写入前的文件快照仍会负责 fail-loud。
+    static func managedAPIKeyIfPresent() -> String? {
+        guard let existing = try? readIfExists(envFilePath) else { return nil }
+        return identityFromManagedBlock(existing).apiKey
+    }
+
     // MARK: - Apply / Remove
 
     /// 幂等写入受管理块。未传入 OPENAI_* 时保留块内已有值，避免系统代理路径把节点身份冲掉。

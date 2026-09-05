@@ -148,6 +148,9 @@ extension ProxyViewModel {
                         errorMessage: log.errorMessage,
                         errorType: log.errorType,
                         statusCode: log.statusCode,
+                        sessionId: log.sessionId,
+                        conversationId: log.conversationId,
+                        upstreamRequestId: log.upstreamRequestId,
                         clientSurface: log.clientSurface,
                         isGlobalProxy: log.isGlobalProxy
                     ))

@@ -4,6 +4,8 @@ extension CodexCostProvider {
     func parseFile(
         _ path: String,
         metadata: SessionMetadata?,
+        routing: CodexProxyRoutingSnapshot,
+        proxyCoverage: inout CodexProxyRoutingSnapshot.Days,
         inheritedTotals: (String, String) -> CodexTotals?
     ) -> CodexFileAggregate {
         var currentModel: String?
@@ -60,7 +62,6 @@ extension CodexCostProvider {
                 extractJSONStringField("model_name", from: data)
             )
             let baseModel = normalizeModel(modelFromInfo ?? currentModel ?? "gpt-5")
-            guard let model = sourceTaggedModel(baseModel, provider: provider) else { return }
 
             var delta = CodexTotals(input: 0, cached: 0, output: 0)
 
@@ -98,19 +99,70 @@ extension CodexCostProvider {
             guard delta.input > 0 || delta.cached > 0 || delta.output > 0 else { return }
             let cached = min(delta.cached, delta.input)
             let nonCachedInput = max(0, delta.input - cached)
+            let residual = consumeProxyCoverage(
+                day: dayKey(timestamp),
+                model: baseModel,
+                inputTokens: nonCachedInput,
+                cacheReadTokens: cached,
+                cacheCreateTokens: 0,
+                outputTokens: delta.output,
+                from: &proxyCoverage
+            )
+
+            // 旧 aiusage-proxy 会话迁移前的全部行已经进入代理归档；迁移后才允许账号/API 混合。
+            if routing.isLegacyProxyRow(sessionID: metadata?.sessionId, timestamp: timestamp) {
+                return
+            }
+            guard let model = sourceTaggedModel(baseModel, provider: provider) else { return }
+            let residualTotal = residual.input + residual.cached + residual.output
+            guard residualTotal > 0 else { return }
             let row = CodexRow(
                 dayKey: dayKey(timestamp),
                 model: model,
-                inputTokens: nonCachedInput,
-                cacheReadTokens: cached,
-                outputTokens: delta.output,
-                totalTokens: nonCachedInput + cached + delta.output,
+                inputTokens: residual.input,
+                cacheReadTokens: residual.cached,
+                outputTokens: residual.output,
+                totalTokens: residualTotal,
                 estimatedCostUsd: 0
             )
             aggregate.record(row: row, hourKey: hourBucketKey(timestamp))
         }
 
         return aggregate
+    }
+
+    /// 从 JSONL 的总 token 中扣掉同一会话、同一天、同一请求模型实际经过 AIUsage 网关的部分。
+    /// 剩余量才属于账号或其它非 AIUsage 路径；组件分别扣减，避免缓存 token 被重复归类。
+    func consumeProxyCoverage(
+        day: String,
+        model: String,
+        inputTokens: Int,
+        cacheReadTokens: Int,
+        cacheCreateTokens: Int,
+        outputTokens: Int,
+        from coverage: inout CodexProxyRoutingSnapshot.Days
+    ) -> (input: Int, cached: Int, cacheCreate: Int, output: Int) {
+        guard var models = coverage[day], var proxy = models[model] else {
+            return (inputTokens, cacheReadTokens, cacheCreateTokens, outputTokens)
+        }
+
+        let usedInput = min(inputTokens, proxy.inputTokens)
+        let usedCacheRead = min(cacheReadTokens, proxy.cacheReadTokens)
+        let usedCacheCreate = min(cacheCreateTokens, proxy.cacheCreateTokens)
+        let usedOutput = min(outputTokens, proxy.outputTokens)
+        proxy.inputTokens -= usedInput
+        proxy.cacheReadTokens -= usedCacheRead
+        proxy.cacheCreateTokens -= usedCacheCreate
+        proxy.outputTokens -= usedOutput
+        models[model] = proxy
+        coverage[day] = models
+
+        return (
+            inputTokens - usedInput,
+            cacheReadTokens - usedCacheRead,
+            cacheCreateTokens - usedCacheCreate,
+            outputTokens - usedOutput
+        )
     }
 
     func scanJSONLLines(
