@@ -1,0 +1,40 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - jweb0689-windows-port
+    paths:
+      - 'QuotaBackend/**'
+      - 'scripts/build-windows-quotaserver.ps1'
+      - '.github/workflows/windows-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          ./scripts/build-windows-quotaserver.ps1
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIUsage-win64
+          path: dist/AIUsage-win64.zip
+          if-no-files-found: error

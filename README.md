@@ -167,6 +167,16 @@ Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage
 
 Universal Binary — runs natively on both Apple Silicon and Intel Macs (macOS 14+).
 
+## Windows build
+
+This repository now includes a portable Windows executable target alongside the macOS app. The Windows deliverable is a self-contained .NET executable and can be built locally with PowerShell:
+
+```powershell
+pwsh ./scripts/build-windows-quotaserver.ps1
+```
+
+The package is emitted as `dist/AIUsage-win64.zip` with the executable named `AIUsage.exe`, and the GitHub Actions workflow at `.github/workflows/windows-release.yml` builds the same artifact on `windows-latest`.
+
 ## CPA Gateway
 
 CPA Gateway turns subscription accounts into one managed local API surface. Powered by the official [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) release. AIUsage downloads, verifies, starts, updates, and can roll back CLIProxyAPI independently, so a CPA update does not require a new AIUsage release.

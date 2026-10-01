@@ -7,7 +7,8 @@ let package = Package(
     products: [
         .library(name: "QuotaBackend", targets: ["QuotaBackend"]),
         .library(name: "QuotaServerCore", targets: ["QuotaServerCore"]),
-        .executable(name: "QuotaServer", targets: ["QuotaServer"])
+        .executable(name: "QuotaServer", targets: ["QuotaServer"]),
+        .executable(name: "AIUsageWindowsCLI", targets: ["AIUsageWindowsCLI"])
     ],
     targets: [
         .target(
@@ -38,6 +39,10 @@ let package = Package(
                 "ParentWatchdog.swift",
             ],
             sources: ["main.swift"]
+        ),
+        .executableTarget(
+            name: "AIUsageWindowsCLI",
+            path: "Sources/AIUsageWindowsCLI"
         ),
         .testTarget(
             name: "QuotaBackendTests",
