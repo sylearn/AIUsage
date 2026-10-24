@@ -240,10 +240,12 @@ class ClaudeSettingsManager {
         try writeSettings(settings)
     }
 
-    /// Full replacement write: backs up current file, then writes the entire settings dict.
-    func writeFullSettings(_ settings: [String: Any]) throws {
+    /// Full replacement write: backs up current file (unless reapplying while already active), then writes the entire settings dict.
+    func writeFullSettings(_ settings: [String: Any], preserveExistingBackup: Bool = false) throws {
         let preserved = try preserveSubscriptionStatusLine(settings)
-        backupCurrentSettings()
+        if !preserveExistingBackup {
+            backupCurrentSettings()
+        }
         try writeSettings(preserved)
         claudeSettingsLog.info("Full settings.json replacement written successfully")
     }

@@ -15,6 +15,7 @@ struct CostTrackingCard: View {
         case "claude": return .orange
         case "codex-cost": return .indigo
         case "opencode": return Color(red: 0.18, green: 0.83, blue: 0.75)
+        case "antigravity-cost": return Color(red: 0.20, green: 0.75, blue: 0.95)
         default: return .blue
         }
     }

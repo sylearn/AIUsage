@@ -115,17 +115,17 @@ nonisolated struct CLIProxyConfigStore {
             try document.setNestedScalar(
                 section: "quota-exceeded",
                 key: "switch-project",
-                value: "true"
+                value: value.quotaSwitchProject ? "true" : "false"
             )
             try document.setNestedScalar(
                 section: "quota-exceeded",
                 key: "switch-preview-model",
-                value: "true"
+                value: value.quotaSwitchPreviewModel ? "true" : "false"
             )
             try document.setNestedScalar(
                 section: "quota-exceeded",
                 key: "antigravity-credits",
-                value: "true"
+                value: value.quotaAntigravityCredits ? "true" : "false"
             )
             try document.setNestedScalar(
                 section: "plugins",

@@ -17,14 +17,17 @@ extension UsageNormalizer {
             )
         }
 
-        let remainingPercent = trackedModels.map(\.remainingPercent).min() ?? pickSmallestRemaining(windows)
+        let coreModels = trackedModels.filter {
+            !$0.label.localizedCaseInsensitiveContains("argon")
+        }
+        let primaryModels = coreModels.isEmpty ? trackedModels : coreModels
+        let remainingPercent = primaryModels.map(\.remainingPercent).min() ?? pickSmallestRemaining(windows)
         let (status, statusLabel) = resolveStatus(remainingPercent)
         let plan = usage.accountPlan ?? "Unknown"
         let projectId = extraString(usage, "projectId")
         let modelCount = extraInt(usage, "modelCount") ?? trackedModels.count
         let authFileCount = extraInt(usage, "authFileCount") ?? 1
         let selectedAuthFile = extraString(usage, "selectedAuthFile")
-        // "groups"：按模型组的 5 小时 / 每周窗口；"models"（或旧快照缺省）：按模型的配额。
         let isGrouped = extraString(usage, "quotaSource") == "groups"
 
         base.accountLabel = preferredAccountEmail(usage)
@@ -33,7 +36,7 @@ extension UsageNormalizer {
         base.status = status
         base.statusLabel = statusLabel
         base.remainingPercent = remainingPercent
-        base.nextResetAt = trackedModels.compactMap { $0.resetAt }.compactMap(parseDate).min().map { SharedFormatters.iso8601String(from: $0) }
+        base.nextResetAt = primaryModels.compactMap { $0.resetAt }.compactMap(parseDate).min().map { SharedFormatters.iso8601String(from: $0) }
         base.nextResetLabel = formatShortDateTime(base.nextResetAt)
         base.headline = HeadlineInfo(
             eyebrow: "Plan · \(plan)",
@@ -50,7 +53,8 @@ extension UsageNormalizer {
             MetricInfo(label: "Source", value: formatSourceLabel(usage.source))
         ]
         base.windows = windows
-        // 分组窗口已经全部列在 windows 里，再列一遍模型只是重复。
+        // retrieveUserQuotaSummary 返回的 4-5 个分组窗口已在 `windows` 区完整展示，
+        // 再复制到 `models` 区会造成同屏重复；仅对旧 per-model 回退路径保留模型列表。
         base.models = trackedModels.isEmpty || isGrouped ? nil : trackedModels.map {
             ModelInfo(
                 label: $0.label,
@@ -60,9 +64,30 @@ extension UsageNormalizer {
         }
         base.spotlight = authFileCount > 1
             ? "Antigravity auth files detected: \(formatInt(authFileCount)). This snapshot uses the most recently updated file (\(selectedAuthFile ?? "unknown"))."
-            : isGrouped
-                ? "Antigravity meters quota per model group, each with a 5-hour and a weekly limit, so the dashboard lists every window and puts the tightest ones first."
-                : "Antigravity exposes per-model quotas, so the dashboard keeps each model separate and puts the tightest ones first."
+            : (isGrouped
+                ? "Antigravity groups models into shared 5-hour and weekly pools, and places the tightest window first."
+                : "Antigravity exposes per-model quotas, so the dashboard keeps each model separate and puts the tightest ones first.")
+
+        let isTripped = (usage.extra["circuitBreakerTripped"]?.value as? Bool) == true
+        let isPartialTripped = (usage.extra["circuitBreakerPartialTripped"]?.value as? Bool) == true
+        let trippedPool = extraString(usage, "circuitBreakerTrippedPool")
+        let reason = extraString(usage, "circuitBreakerReason") ?? "Quota <= 5%"
+
+        if isTripped {
+            base.status = "watch"
+            base.statusLabel = "Protected (CPA Paused)"
+            base.spotlight = "🛡️ Cầu dao thông minh: Đã tự động tạm ngắt toàn bộ tài khoản này khỏi CLIProxyAPI để chống ban (\(reason)). Khi quota hồi phục, tài khoản sẽ tự động kích hoạt lại."
+        } else if isPartialTripped {
+            base.status = "watch"
+            if trippedPool == "claude" {
+                base.statusLabel = "Claude Paused (Gemini Active)"
+                base.spotlight = "🛡️ Cầu dao thông minh (Đa tầng): Đã tạm ngắt model Claude khỏi CLIProxyAPI (\(reason)). Các model Gemini của tài khoản này vẫn hoạt động bình thường cho bot RonC & Hermes."
+            } else if trippedPool == "gemini" {
+                base.statusLabel = "Gemini Paused (Claude Active)"
+                base.spotlight = "🛡️ Cầu dao thông minh (Đa tầng): Đã tạm ngắt model Gemini khỏi CLIProxyAPI (\(reason)). Các model Claude của tài khoản này vẫn hoạt động bình thường."
+            }
+        }
+
         return base
     }
 }

@@ -27,24 +27,26 @@ struct ProxyStatsView: View {
     enum StatMetric: String, CaseIterable { case cost, tokens }
 
     enum SourceFamily: String, CaseIterable {
-        case all, claude, codex, opencode
+        case all, claude, codex, opencode, antigravity
 
         var adapterFamily: StatsDataAdapter.SourceFamily {
             switch self {
-            case .all:      return .all
-            case .claude:   return .claude
-            case .codex:    return .codex
-            case .opencode: return .opencode
+            case .all:         return .all
+            case .claude:      return .claude
+            case .codex:       return .codex
+            case .opencode:    return .opencode
+            case .antigravity: return .antigravity
             }
         }
 
         /// 对应的 agent（用于侧边栏隐藏联动）；`.all` 无对应 agent。
         var agentKind: AgentKind? {
             switch self {
-            case .all:      return nil
-            case .claude:   return .claude
-            case .codex:    return .codex
-            case .opencode: return .opencode
+            case .all:         return nil
+            case .claude:      return .claude
+            case .codex:       return .codex
+            case .opencode:    return .opencode
+            case .antigravity: return nil
             }
         }
     }
@@ -82,6 +84,10 @@ struct ProxyStatsView: View {
 
     var opencodeLocalProviders: [ProviderData] {
         localProviders.filter { $0.baseProviderId == "opencode" }
+    }
+
+    var antigravityLocalProviders: [ProviderData] {
+        localProviders.filter { $0.baseProviderId == "antigravity-cost" }
     }
 
     /// 持久化选中的家族若其 agent 已被隐藏，则回退到「综合」（不改写偏好，取消隐藏后自动恢复）。
@@ -289,6 +295,7 @@ struct ProxyStatsView: View {
             case .claude: return "Claude"
             case .codex: return "Codex"
             case .opencode: return "OpenCode"
+            case .antigravity: return "Antigravity"
             }
         }
     }
@@ -363,6 +370,7 @@ struct ProxyStatsView: View {
         let showClaude = sourceFamily == .all || sourceFamily == .claude
         let showCodex = sourceFamily == .all || sourceFamily == .codex
         let showOpenCode = sourceFamily == .all || sourceFamily == .opencode
+        let showAntigravity = sourceFamily == .all || sourceFamily == .antigravity
 
         VStack(spacing: 16) {
             if showClaude && !claudeLocalProviders.isEmpty {
@@ -407,6 +415,21 @@ struct ProxyStatsView: View {
                         if let presentation {
                             activeHeatmapTooltip = presentation
                         } else if activeHeatmapTooltip?.sourceID == "opencode" {
+                            activeHeatmapTooltip = nil
+                        }
+                    }
+                )
+            }
+            if showAntigravity && !antigravityLocalProviders.isEmpty {
+                LocalTokenUsageHeatmap(
+                    providers: antigravityLocalProviders,
+                    brandLabel: "Antigravity",
+                    brandAsset: "antigravity",
+                    accent: HeatmapBrandColor.antigravity(colorScheme),
+                    onTooltipChange: { presentation in
+                        if let presentation {
+                            activeHeatmapTooltip = presentation
+                        } else if activeHeatmapTooltip?.sourceID == "antigravity" {
                             activeHeatmapTooltip = nil
                         }
                     }

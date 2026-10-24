@@ -24,6 +24,7 @@ enum ProxyUsageFamily: String, CaseIterable, Sendable {
     /// OpenCode 全局统一代理轨：用量/成本来自代理日志（按激活节点定价冻结），
     /// 与 opencode.db 互斥（db 侧已排除全局 provider，避免双计）。
     case opencode
+    case antigravity
 }
 
 /// 一个产品面的冻结用量。它是模型总桶的可选细分，不参与旧版总量读取，

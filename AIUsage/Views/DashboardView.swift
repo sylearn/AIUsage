@@ -54,7 +54,7 @@ struct DashboardView: View {
     private var isAwaitingLocalStats: Bool {
         !refreshCoordinator.hasCompletedInitialLoad
             && costTrackingProviders.isEmpty
-            && appState.selectedProviderIds.contains(where: { $0 == "claude" || $0 == "codex-cost" || $0 == "opencode" })
+            && appState.selectedProviderIds.contains(where: { $0 == "claude" || $0 == "codex-cost" || $0 == "opencode" || $0 == "antigravity-cost" })
     }
 
     // MARK: - Overview Section
@@ -116,10 +116,14 @@ struct DashboardView: View {
         costTrackingProviders.filter { $0.baseProviderId == "opencode" }
     }
 
-    /// 顶部活动热力图：按账本家族（Claude / Codex / OpenCode）拆块展示，
+    private var antigravityLocalProviders: [ProviderData] {
+        costTrackingProviders.filter { $0.baseProviderId == "antigravity-cost" }
+    }
+
+    /// 顶部活动热力图：按账本家族（Claude / Codex / OpenCode / Antigravity）拆块展示，
     /// 各自带上自家品牌色，与卡片/图标/菜单栏口径一致。
     /// 数据源统一为本地 costSummary：Claude 来自代理归档，Codex 来自代理归档 + 非代理 token 日志，
-    /// OpenCode 来自本地会话库归档。
+    /// OpenCode 来自本地会话库归档，Antigravity 来自本地会话日志 + 代理归档。
     private var dashboardHeatmapWeeks: Int { 26 }
 
     /// 单块热力图描述：数据驱动取代家族二元硬编码，新增本地 cost 工具时只需补一行。
@@ -135,8 +139,12 @@ struct DashboardView: View {
         [
             HeatmapSpec(id: "claude", providers: claudeLocalProviders, label: "Claude", asset: "claude", accent: HeatmapBrandColor.claude(colorScheme)),
             HeatmapSpec(id: "codex-cost", providers: codexLocalProviders, label: "Codex", asset: "codex", accent: HeatmapBrandColor.codex(colorScheme)),
-            HeatmapSpec(id: "opencode", providers: opencodeLocalProviders, label: "OpenCode", asset: "opencode", accent: HeatmapBrandColor.openCode(colorScheme))
-        ].filter { !$0.providers.isEmpty }
+            HeatmapSpec(id: "opencode", providers: opencodeLocalProviders, label: "OpenCode", asset: "opencode", accent: HeatmapBrandColor.openCode(colorScheme)),
+            HeatmapSpec(id: "antigravity-cost", providers: antigravityLocalProviders, label: "Antigravity", asset: "antigravity", accent: HeatmapBrandColor.antigravity(colorScheme))
+        ].filter { spec in
+            guard let provider = spec.providers.first, let summary = provider.costSummary else { return false }
+            return (summary.overall?.tokens ?? 0) > 0 || (summary.overall?.usd ?? 0) > 0
+        }
     }
 
     private func heatmap(for spec: HeatmapSpec) -> some View {

@@ -298,6 +298,29 @@ final class OpenCodeConfigManager {
         } catch { rejected = true }
         try expect(rejected, "Claude real write failure swallowed")
         try expect(!FileManager.default.fileExists(atPath: blockedDirectory.appendingPathComponent("settings.aiusage-common.json").path), "Claude failed write left an applied ledger")
+
+        // 激活直接节点 → 重复应用通用配置（preserveExistingBackup: true）→ 停用节点：必须恢复激活前的原始设置，而非节点设置。
+        let directDir = fixtureRoot.appendingPathComponent("direct-claude-backup")
+        try FileManager.default.createDirectory(at: directDir, withIntermediateDirectories: true)
+        let directFile = directDir.appendingPathComponent("settings.json")
+        try JSONSerialization.data(withJSONObject: ["effortLevel": "xhigh", "userBaseline": true]).write(to: directFile)
+        let directManager = ClaudeSettingsManager(directory: directDir)
+        try directManager.writeFullSettings(["effortLevel": "low", "env": ["ANTHROPIC_BASE_URL": "http://127.0.0.1:15500"]])
+        try directManager.writeFullSettings(["effortLevel": "high", "env": ["ANTHROPIC_BASE_URL": "http://127.0.0.1:15500"]], preserveExistingBackup: true)
+        try directManager.restoreFromBackup()
+        let restoredDirect = try json(directFile)
+        try expect(restoredDirect["userBaseline"] as? Bool == true, "Direct Claude node pre-activation baseline lost after reapply")
+        try expect((restoredDirect["env"] as? [String: Any])?["ANTHROPIC_BASE_URL"] == nil, "Direct Claude node proxy route leaked into restored backup")
+
+        // 首次激活前无 settings.json → 重复应用通用配置（preserveExistingBackup: true）→ 停用节点：不得生成代理备份，必须清理代理路由。
+        let noBaselineDir = fixtureRoot.appendingPathComponent("direct-claude-no-baseline")
+        let noBaselineManager = ClaudeSettingsManager(directory: noBaselineDir)
+        try noBaselineManager.writeFullSettings(["effortLevel": "low", "env": ["ANTHROPIC_BASE_URL": "http://127.0.0.1:15500"]])
+        try noBaselineManager.writeFullSettings(["effortLevel": "high", "env": ["ANTHROPIC_BASE_URL": "http://127.0.0.1:15500"]], preserveExistingBackup: true)
+        try noBaselineManager.restoreFromBackup()
+        let restoredNoBaseline = try noBaselineManager.readSettings()
+        try expect((restoredNoBaseline["env"] as? [String: Any])?["ANTHROPIC_BASE_URL"] == nil, "No-baseline Claude reapply leaked proxy route after restore")
+        try expect(!FileManager.default.fileExists(atPath: noBaselineDir.appendingPathComponent("settings.backup.json").path), "No-baseline Claude reapply manufactured a backup file")
     }
 
     static func opencode() throws {

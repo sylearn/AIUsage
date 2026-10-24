@@ -48,6 +48,7 @@ public enum UsageNormalizer {
 
     static let providerThemes: [String: ThemeInfo] = [
         "antigravity": ThemeInfo(accent: "sky", glow: "#5cc9ff"),
+        "antigravity-cost": ThemeInfo(accent: "sky", glow: "#5cc9ff"),
         "claude":  ThemeInfo(accent: "sunset", glow: "#ff9d6c"),
         "claude-subscription": ThemeInfo(accent: "sunset", glow: "#d97757"),
         "codex-cost": ThemeInfo(accent: "indigo", glow: "#6875ff"),
@@ -107,6 +108,7 @@ public enum UsageNormalizer {
         switch provider.id {
         case "warp":    return normalizeWarp(base: &base, usage: usage)
         case "antigravity": return normalizeAntigravity(base: &base, usage: usage)
+        case "antigravity-cost": return normalizeAntigravityCost(base: &base, usage: usage)
         case "claude":  return normalizeClaude(base: &base, usage: usage)
         case "claude-subscription": return normalizeClaudeSubscription(base: &base, usage: usage)
         case "codex-cost": return normalizeCodexCost(base: &base, usage: usage)
@@ -513,7 +515,7 @@ public enum UsageNormalizer {
         switch providerId {
         case "cursor", "copilot", "kiro", "antigravity", "warp":
             return "ide"
-        case "claude", "codex-cost", "opencode":
+        case "claude", "codex-cost", "opencode", "antigravity-cost":
             return "local"
         default:
             return "cli"
@@ -524,6 +526,8 @@ public enum UsageNormalizer {
         switch providerId {
         case "codex-cost":
             return "Codex"
+        case "antigravity-cost":
+            return "Antigravity"
         case "claude":
             return "Claude"
         case "copilot":

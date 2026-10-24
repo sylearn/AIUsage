@@ -586,6 +586,12 @@ enum HeatmapBrandColor {
             ? Color(red: 0.208, green: 0.804, blue: 0.745)
             : Color(red: 0.000, green: 0.490, blue: 0.459)
     }
+
+    static func antigravity(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.235, green: 0.725, blue: 0.980)
+            : Color(red: 0.055, green: 0.502, blue: 0.745)
+    }
 }
 
 enum HeatmapTooltipCoordinateSpace {

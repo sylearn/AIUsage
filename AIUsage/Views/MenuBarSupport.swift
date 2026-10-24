@@ -19,7 +19,7 @@ enum MenuBarHelpers {
 enum MenuBarColors {
     static func accent(for providerId: String) -> Color {
         switch providerId {
-        case "antigravity": return .cyan
+        case "antigravity", "antigravity-cost": return .cyan
         case "copilot": return .blue
         case "claude": return .purple
         case "claude-subscription": return .orange

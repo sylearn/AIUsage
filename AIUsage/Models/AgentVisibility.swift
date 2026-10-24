@@ -86,7 +86,7 @@ enum AgentVisibility {
     /// 可能是 nil，不能靠 `category != local-cost` 把它们当成配额账号。
     static func isLocalCostCatalogId(_ providerId: String) -> Bool {
         switch providerId {
-        case "claude", "codex-cost", "opencode": return true
+        case "claude", "codex-cost", "opencode", "antigravity-cost": return true
         default: return false
         }
     }

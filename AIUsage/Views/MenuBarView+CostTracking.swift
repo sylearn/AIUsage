@@ -49,7 +49,8 @@ extension MenuBarView {
     private static let costSourceDescriptors: [(providerId: String, label: String, iconAsset: String, tint: Color)] = [
         ("claude", "Claude", "claude", Color(red: 0.85, green: 0.45, blue: 0.25)),
         ("codex-cost", "Codex", "codex", Color(red: 0.40, green: 0.52, blue: 0.92)),
-        ("opencode", "OpenCode", "opencode", Color(red: 0.18, green: 0.83, blue: 0.75))
+        ("opencode", "OpenCode", "opencode", Color(red: 0.18, green: 0.83, blue: 0.75)),
+        ("antigravity-cost", "Antigravity", "antigravity", Color(red: 0.20, green: 0.75, blue: 0.95))
     ]
 
     /// 有费用/用量数据的本地 cost 工具及其 costSummary。

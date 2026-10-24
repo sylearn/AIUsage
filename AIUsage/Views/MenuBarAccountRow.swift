@@ -36,13 +36,17 @@ struct MenuBarAccountRow: View {
     /// 每节点代理（codexProxyActive）仍允许账号切换——切换会自动停用该代理（既有自动交接语义）。
     private var canActivate: Bool {
         if entry.providerId == "codex", codexGlobalProxyManaged { return false }
-        return activationManager.canSwitch(to: entry) && !isActive
+        return activationManager.canActivateProvider(providerId) && !isActive
     }
     private var remainingPercent: Double? { entry.liveProvider?.remainingPercent }
     private var isCostProvider: Bool { entry.liveProvider?.category == ProviderCategory.localCost }
     private var costMonthUsd: Double? { entry.liveProvider?.costSummary?.month?.usd }
     private var windows: [QuotaWindow] { entry.liveProvider?.windows ?? [] }
-    @State private var isWindowsExpanded = false
+    @State private var isWindowsExpandedOverride: Bool?
+
+    private var isWindowsExpanded: Bool {
+        isWindowsExpandedOverride ?? (entry.providerId == "antigravity" && windows.count <= 6)
+    }
 
     private var isPinnedToStatusBar: Bool {
         if isCostProvider {
@@ -191,8 +195,6 @@ struct MenuBarAccountRow: View {
                 activeBadge
             } else if canActivate {
                 switchButton
-            } else if activationManager.isRemoteViewOnly(entry) {
-                GatewayQuietBadge(text: ProviderActivationManager.remoteViewOnlyLabel)
             }
         }
     }
@@ -224,7 +226,7 @@ struct MenuBarAccountRow: View {
 
             if hasOverflow {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { isWindowsExpanded.toggle() }
+                    withAnimation(.easeInOut(duration: 0.2)) { isWindowsExpandedOverride = !isWindowsExpanded }
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: isWindowsExpanded ? "chevron.up" : "chevron.down")

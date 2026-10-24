@@ -596,7 +596,7 @@ class NodeProfileStore: ObservableObject {
                 env["ANTHROPIC_BASE_URL"] = "https://\(config.host):\(config.effectiveHTTPSPort)"
                 settings["env"] = env
             }
-            try ClaudeSettingsManager.shared.writeFullSettings(settings)
+            try ClaudeSettingsManager.shared.writeFullSettings(settings, preserveExistingBackup: true)
         }
     }
 

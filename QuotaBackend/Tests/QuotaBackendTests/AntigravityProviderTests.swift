@@ -49,6 +49,48 @@ final class AntigravityProviderTests: XCTestCase {
         XCTAssertEqual(models.map(\.remainingPercent), [0, 90])
     }
 
+    /// Gemini 4 Argon 为附加周额度池：必须展示在 5 个窗口中，但耗尽时不能拉低账号主剩余百分比或触发断路器。
+    func testGemini4ArgonAuxiliaryBucketDoesNotDragDownHeadlineRemainingPercent() async throws {
+        let summaryWithExhaustedArgon = """
+        {"groups":[
+          {"displayName":"Gemini Models","buckets":[
+            {"bucketId":"gemini-weekly","displayName":"Weekly Limit Remaining","window":"weekly","remainingFraction":0.9923,"resetTime":"2026-10-25T00:00:00Z"},
+            {"bucketId":"gemini-5h","displayName":"Five Hour Limit Remaining","window":"5h","remainingFraction":1.0,"resetTime":"2026-10-20T15:00:00Z"}
+          ]},
+          {"displayName":"Claude and GPT models","buckets":[
+            {"bucketId":"3p-weekly","displayName":"Weekly Limit Remaining","window":"weekly","remainingFraction":0.9531,"resetTime":"2026-10-25T00:00:00Z"},
+            {"bucketId":"3p-5h","displayName":"Five Hour Limit Remaining","window":"5h","remainingFraction":1.0,"resetTime":"2026-10-20T15:00:00Z"}
+          ]},
+          {"displayName":"Gemini 4 Argon","buckets":[
+            {"bucketId":"gemini-argon-wtu-weekly","displayName":"Gemini 4 Argon Weekly Limit","window":"weekly","remainingFraction":0.0008,"resetTime":"2026-10-28T13:17:17Z"}
+          ]}
+        ]}
+        """
+        StubURLProtocol.respond(Self.dailySummary, status: 200, body: summaryWithExhaustedArgon)
+
+        let usage = try await provider.fetchUsage(with: makeCredential())
+        let normalized = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(normalized.windows.count, 5)
+        XCTAssertEqual(normalized.windows.last?.label, "Gemini 4 Argon · Weekly")
+        XCTAssertEqual(normalized.windows.last?.remainingPercent ?? -1, 0.08, accuracy: 0.001)
+        // Headline remainingPercent reflects tightest core pool (Claude + GPT · Weekly = 95.31%), not Argon (0.08%)
+        XCTAssertEqual(normalized.remainingPercent ?? -1, 95.31, accuracy: 0.01)
+        XCTAssertEqual(normalized.status, "healthy")
+    }
+
+    func testExtractsSelectedModelFromTranscriptSettingsChange() {
+        let line1 = #"{"type":"USER_INPUT","content":"<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 4 Argon (Medium). No need to acknowledge this change.\n</USER_SETTINGS_CHANGE>"}"#
+        let line2 = #"{"type":"USER_INPUT","content":"<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Argon (Medium) to Gemini 3.8 Flash (High).\n</USER_SETTINGS_CHANGE>"}"#
+        let line3 = #"{"type":"USER_INPUT","content":"<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Claude Opus 4.6 (Thinking). No need to acknowledge this change.\n</USER_SETTINGS_CHANGE>"}"#
+        let codeDiscussionLine = #"{"type":"PLANNER_RESPONSE","content":"if line.contains(\"Model Selection from None to Gemini 2.5 Flash\")"}"#
+
+        XCTAssertEqual(AntigravityCostProvider.extractSelectedModel(from: line1), "gemini-4-argon")
+        XCTAssertEqual(AntigravityCostProvider.extractSelectedModel(from: line2), "gemini-3.8-flash")
+        XCTAssertEqual(AntigravityCostProvider.extractSelectedModel(from: line3), "claude-opus-4.6")
+        XCTAssertNil(AntigravityCostProvider.extractSelectedModel(from: codeDiscussionLine))
+    }
+
     func testSummaryWithoutUsableBucketsIsRejected() {
         XCTAssertNil(provider.parseQuotaSummary([:]))
         XCTAssertNil(provider.parseQuotaSummary(Self.json(#"{"groups":[]}"#)))

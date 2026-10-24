@@ -22,26 +22,71 @@ public struct CodexAccountIdentity: Equatable, Sendable {
         )
     }
 
-    /// 同时支持 Codex 原生 auth.json 和 CPA 扁平文件；先取用户原生 ID，最后才取 sub。
+    /// 同时支持 Codex 原生 auth.json 和 CPA 扁平文件；先取当前生效 token 组的用户原生 ID，最后才取 sub。
     public init(authJSON json: [String: Any]) {
         let tokens = json["tokens"] as? [String: Any] ?? [:]
-        let claims = [
-            tokens["id_token"] ?? tokens["idToken"] ?? json["id_token"] ?? json["idToken"],
-            tokens["access_token"] ?? tokens["accessToken"] ?? json["access_token"] ?? json["accessToken"],
-        ].compactMap { Self.jwtPayload($0 as? String) }
+        let flatAccess = (json["access_token"] ?? json["accessToken"]) as? String
+        let nestedAccess = (tokens["access_token"] ?? tokens["accessToken"]) as? String
+        let flatId = (json["id_token"] ?? json["idToken"]) as? String
+        let nestedId = (tokens["id_token"] ?? tokens["idToken"]) as? String
+
+        let hasFlatTokens = flatAccess != nil || flatId != nil
+        let hasNestedTokens = nestedAccess != nil || nestedId != nil
+        let preferFlat: Bool
+        if hasFlatTokens && hasNestedTokens {
+            preferFlat = Self.tokenIssuedAt(flatAccess) >= Self.tokenIssuedAt(nestedAccess)
+        } else {
+            preferFlat = hasFlatTokens
+        }
+
+        let rawIdToken = preferFlat ? (flatId ?? (hasFlatTokens ? nil : nestedId)) : (nestedId ?? (hasNestedTokens ? nil : flatId))
+        let activeAccessToken = preferFlat ? (flatAccess ?? (hasFlatTokens ? nil : nestedAccess)) : (nestedAccess ?? (hasNestedTokens ? nil : flatAccess))
+        let accessIdentity = Self.tokenIdentity(activeAccessToken)
+        let idTokenIdentity = Self.tokenIdentity(rawIdToken)
+        let internalConflict = activeAccessToken != nil && rawIdToken != nil && accessIdentity.conflicts(with: idTokenIdentity)
+        if internalConflict {
+            self.init(accountId: nil, userId: nil, email: nil)
+            return
+        }
+        let activeIdToken = rawIdToken
+
+        let claims = [activeIdToken, activeAccessToken].compactMap { Self.jwtPayload($0) }
         let auth = claims.compactMap { $0["https://api.openai.com/auth"] as? [String: Any] }
         func first(_ values: [Any?]) -> String? {
             values.lazy.compactMap { Self.normalized($0 as? String) }.first
         }
-        let accountId = first([tokens["account_id"], tokens["accountId"], json["account_id"], json["accountId"], json["chatgpt_account_id"]]
-            + auth.map { $0["chatgpt_account_id"] } + claims.map { $0["chatgpt_account_id"] })
-        let userId = first([json["chatgpt_user_id"]]
-            + auth.map { $0["chatgpt_user_id"] } + claims.map { $0["chatgpt_user_id"] }
+        let accountCandidates: [Any?] = preferFlat
+            ? [json["account_id"], json["accountId"], json["chatgpt_account_id"], tokens["account_id"], tokens["accountId"]]
+            : [tokens["account_id"], tokens["accountId"], json["account_id"], json["accountId"], json["chatgpt_account_id"]]
+        let accountId = first(auth.map { $0["chatgpt_account_id"] } + claims.map { $0["chatgpt_account_id"] } + accountCandidates)
+        let rootUserCandidates: [Any?] = internalConflict ? [] : [json["chatgpt_user_id"], json["user_id"]]
+        let userId = first(auth.map { $0["chatgpt_user_id"] } + claims.map { $0["chatgpt_user_id"] }
             + auth.map { $0["user_id"] } + claims.map { $0["user_id"] }
-            + [json["user_id"]] + claims.map { $0["sub"] })
-        let email = first([json["email"]] + claims.map { $0["email"] }
-            + claims.map { ($0["https://api.openai.com/profile"] as? [String: Any])?["email"] })
+            + rootUserCandidates + claims.map { $0["sub"] })
+        let rootEmailCandidates: [Any?] = internalConflict ? [] : [json["email"]]
+        let email = first(claims.map { $0["email"] }
+            + claims.map { ($0["https://api.openai.com/profile"] as? [String: Any])?["email"] }
+            + rootEmailCandidates)
         self.init(accountId: accountId, userId: userId, email: email)
+    }
+
+    static func tokenIdentity(_ token: String?) -> Self {
+        guard let claim = jwtPayload(token) else {
+            return Self(accountId: nil, userId: nil, email: nil)
+        }
+        let auth = claim["https://api.openai.com/auth"] as? [String: Any]
+        func first(_ values: [Any?]) -> String? {
+            values.lazy.compactMap { Self.normalized($0 as? String) }.first
+        }
+        let accountId = first([auth?["chatgpt_account_id"], claim["chatgpt_account_id"]])
+        let userId = first([auth?["chatgpt_user_id"], claim["chatgpt_user_id"], auth?["user_id"], claim["user_id"], claim["sub"]])
+        let email = first([claim["email"], (claim["https://api.openai.com/profile"] as? [String: Any])?["email"]])
+        return Self(accountId: accountId, userId: userId, email: email)
+    }
+
+    private static func tokenIssuedAt(_ token: String?) -> Double {
+        let payload = jwtPayload(token)
+        return (payload?["iat"] as? Double) ?? (payload?["exp"] as? Double) ?? 0
     }
 
     public var nativeKey: String? {

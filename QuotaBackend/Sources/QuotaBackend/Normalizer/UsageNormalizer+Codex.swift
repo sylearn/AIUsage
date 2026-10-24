@@ -54,6 +54,15 @@ extension UsageNormalizer {
 
         base.windows = windows
         base.spotlight = "Codex has multiple overlapping guardrails, so the UI surfaces all windows together and uses the tightest one to drive alerting."
+
+        let isTripped = (usage.extra["circuitBreakerTripped"]?.value as? Bool) == true
+        if isTripped {
+            base.status = "watch"
+            base.statusLabel = "Protected (CPA Paused)"
+            let reason = extraString(usage, "circuitBreakerReason") ?? "Quota <= 5%"
+            base.spotlight = "🛡️ Cầu dao thông minh: Đã tự động tạm ngắt tài khoản này khỏi CLIProxyAPI để bảo toàn hạn mức (\(reason)). Khi quota hồi phục (> 5%), tài khoản sẽ tự động kích hoạt lại."
+        }
+
         return base
     }
 

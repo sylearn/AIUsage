@@ -12,7 +12,11 @@ final class CLIProxyRuntimeController: ObservableObject {
         catch { preconditionFailure("CLIProxyAPI runtime storage is unavailable: \(error.localizedDescription)") }
     }()
 
-    @Published private(set) var state: CLIProxyRuntimeState = .stopped
+    @Published private(set) var state: CLIProxyRuntimeState = .stopped {
+        didSet {
+            updateActivityAssertion()
+        }
+    }
     @Published private(set) var recentLogs: [String] = []
     /// 客户端密钥曾变更且用户尚未重新复制/确认时为 true。
     @Published private(set) var clientKeyNeedsRecopy = false
@@ -47,6 +51,23 @@ final class CLIProxyRuntimeController: ObservableObject {
     private var stderrPipe: Pipe?
     private var pendingProcessLogs: [String] = []
     private var logFlushTask: Task<Void, Never>?
+    private var runningActivity: NSObjectProtocol?
+
+    private func updateActivityAssertion() {
+        if state.isRunning {
+            if runningActivity == nil {
+                runningActivity = ProcessInfo.processInfo.beginActivity(
+                    options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+                    reason: "CLIProxyAPI Gateway 24/7"
+                )
+            }
+        } else {
+            if let activity = runningActivity {
+                ProcessInfo.processInfo.endActivity(activity)
+                runningActivity = nil
+            }
+        }
+    }
 
     private var pidURL: URL { paths.root.appendingPathComponent("runtime.pid.json") }
     var baseURL: URL { URL(string: "http://127.0.0.1:\(settings.normalized.port)")! }
@@ -235,6 +256,23 @@ final class CLIProxyRuntimeController: ObservableObject {
                 throw CLIProxyGatewayError.notInstalled
             }
             let normalized = settings.normalized
+
+            // Health-First: if a listener is already responsive on this port, adopt it without killing in-flight streams
+            if !Self.isIPv4PortAvailable(normalized.port, bindHost: normalized.bindHost) {
+                let endpoint = baseURL.appendingPathComponent("healthz")
+                var request = URLRequest(url: endpoint, timeoutInterval: 1.0)
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                if let (_, response) = try? await URLSession.shared.data(for: request),
+                   let http = response as? HTTPURLResponse,
+                   (200..<300).contains(http.statusCode) {
+                    cliProxyRuntimeLog.notice("CPA Gateway listener is already healthy on port \(normalized.port, privacy: .public); adopting running state.")
+                    restartAttempts = 0
+                    let existingPID = Self.pidsListening(on: normalized.port).first ?? 0
+                    state = .running(pid: existingPID)
+                    return
+                }
+            }
+
             // Debug 重编译 / 上次强退后，外部 CPA 可能仍占端口；启动前再收一次本机托管孤儿。
             reapOwnedOrphanIfNeeded()
             reapStaleManagedListenerIfNeeded(port: normalized.port)
@@ -312,7 +350,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         process.terminationHandler = nil
         if process.isRunning {
             process.terminate()
-            let deadline = Date().addingTimeInterval(3)
+            let deadline = Date().addingTimeInterval(30)
             while process.isRunning, Date() < deadline {
                 try? await Task.sleep(for: .milliseconds(50))
             }
@@ -409,16 +447,23 @@ final class CLIProxyRuntimeController: ObservableObject {
             return
         }
         appendLog("[AIUsage] CPA exited unexpectedly (status \(status)).")
-        guard restartAttempts < 3 else {
-            state = .failed("CLIProxyAPI exited repeatedly; automatic restart stopped.")
-            return
-        }
-        restartAttempts += 1
-        state = .starting
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(Double(self?.restartAttempts ?? 1)))
-            guard let self, self.shouldBeRunning else { return }
-            await self.startOnce()
+        if restartAttempts < 5 {
+            restartAttempts += 1
+            state = .starting
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(Double(self?.restartAttempts ?? 1) * 2.0))
+                guard let self, self.shouldBeRunning else { return }
+                await self.startOnce()
+            }
+        } else {
+            state = .failed("CLIProxyAPI exited repeatedly; scheduling auto-recovery in 30s.")
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, self.shouldBeRunning else { return }
+                self.appendLog("[AIUsage] Attempting auto-recovery for CPA Gateway...")
+                self.restartAttempts = 0
+                await self.startOnce()
+            }
         }
     }
 

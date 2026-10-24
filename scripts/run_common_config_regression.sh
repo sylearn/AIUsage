@@ -11,7 +11,7 @@ jq -r '.swiftCommands[] | select(.moduleName == "QuotaBackend") | .objects[]' \
   "$BACKEND_BIN/description.json" > "$REGRESSION_DIR/backend-objects.txt"
 
 # 编译真实保存、适配器、合并与文件写入代码；只替换代理进程/账号等边界。
-ruby - "$PROJECT_DIR" "$REGRESSION_DIR" "${1:-}" <<'RUBY'
+ruby -E UTF-8:UTF-8 - "$PROJECT_DIR" "$REGRESSION_DIR" "${1:-}" <<'RUBY'
 root, destination, mode = ARGV
 def extract(source, pattern, terminator = /^    }\s*$/)
   lines = source.lines

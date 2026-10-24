@@ -448,7 +448,7 @@ struct ProviderPickerView: View {
 
     private func selectionAccent(for item: ProviderCatalogItem) -> Color {
         switch item.id {
-        case "antigravity": return .cyan
+        case "antigravity", "antigravity-cost": return .cyan
         case "copilot": return .blue
         case "claude", "claude-subscription": return .orange
         case "cursor": return .green
@@ -570,7 +570,7 @@ private struct SourceSelectionCard: View {
 
     private var accentColor: Color {
         switch item.id {
-        case "antigravity": return .cyan
+        case "antigravity", "antigravity-cost": return .cyan
         case "copilot": return .blue
         case "claude", "claude-subscription": return .orange
         case "cursor": return .green

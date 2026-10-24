@@ -16,6 +16,7 @@ struct ProviderIconView: View {
         case "anthropic", "claude-subscription": return "claude"
         case "gemini-cli": return "gemini"
         case "github-copilot": return "copilot"
+        case "antigravity-cost": return "antigravity"
         default: return providerId
         }
     }
@@ -84,7 +85,7 @@ struct ProviderIconView: View {
 
     private var fallbackSymbol: String {
         switch providerId {
-        case "antigravity": return "atom"
+        case "antigravity", "antigravity-cost": return "atom"
         case "copilot": return "chevron.left.forwardslash.chevron.right"
         case "claude", "claude-subscription": return "sparkles"
         case "claude-science": return "atom"
@@ -107,7 +108,7 @@ struct ProviderIconView: View {
 
     private var accentColor: Color {
         switch providerId {
-        case "antigravity": return .cyan
+        case "antigravity", "antigravity-cost": return .cyan
         case "copilot": return .blue
         case "claude":  return .purple
         case "claude-subscription": return .orange

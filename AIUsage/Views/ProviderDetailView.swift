@@ -430,7 +430,7 @@ struct ProviderDetailView: View {
 
     private var accentColor: Color {
         switch provider.providerId {
-        case "antigravity": return .cyan
+        case "antigravity", "antigravity-cost": return .cyan
         case "copilot": return .blue
         case "claude": return .purple
         case "claude-subscription": return .orange

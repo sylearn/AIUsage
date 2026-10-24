@@ -185,17 +185,17 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
     var routingStrategy: CLIProxyRoutingStrategy = .roundRobin
     /// CPA `request-retry`：单次请求在可用凭据上的重试次数上限（含 429 冷却等待场景）。
     /// 官方示例默认 3；与「额度用尽换号」互补，不是二选一。
-    var requestRetry: Int = 3
+    var requestRetry: Int = 1
     /// CPA `max-retry-interval`（秒）。为 0 时上游会跳过冷却等待重试，429 几乎无法换号。
     var maxRetryInterval: Int = 30
     /// CPA `max-retry-credentials`：单次请求最多尝试几把凭据；0 = 尝试全部可用凭据。
     var maxRetryCredentials: Int = 0
-    /// CPA `quota-exceeded.switch-project`。缺省写入 true：额度/429 时切到其它可用凭据。
-    var quotaSwitchProject: Bool = true
+    /// CPA `quota-exceeded.switch-project`。关闭以防止触发 Google Cloud Code TOS_VIOLATION。
+    var quotaSwitchProject: Bool = false
     /// CPA `quota-exceeded.switch-preview-model`。
     var quotaSwitchPreviewModel: Bool = true
-    /// CPA `quota-exceeded.antigravity-credits`。
-    var quotaAntigravityCredits: Bool = true
+    /// CPA `quota-exceeded.antigravity-credits`。关闭以防止触发 Google 账户违规封禁。
+    var quotaAntigravityCredits: Bool = false
     var proxyURL: String = ""
     var enablePlugins: Bool = false
     /// AIUsage 侧：定时用「列模型」复检账号连通（不写 CPA yaml，无需重启进程）。
@@ -210,12 +210,12 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
         autoStart: Bool = false,
         allowLANAccess: Bool = false,
         routingStrategy: CLIProxyRoutingStrategy = .roundRobin,
-        requestRetry: Int = 3,
+        requestRetry: Int = 1,
         maxRetryInterval: Int = 30,
         maxRetryCredentials: Int = 0,
-        quotaSwitchProject: Bool = true,
+        quotaSwitchProject: Bool = false,
         quotaSwitchPreviewModel: Bool = true,
-        quotaAntigravityCredits: Bool = true,
+        quotaAntigravityCredits: Bool = false,
         proxyURL: String = "",
         enablePlugins: Bool = false,
         accountModelProbeEnabled: Bool = true,
@@ -251,13 +251,12 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
         autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
         allowLANAccess = try container.decodeIfPresent(Bool.self, forKey: .allowLANAccess) ?? false
         routingStrategy = try container.decodeIfPresent(CLIProxyRoutingStrategy.self, forKey: .routingStrategy) ?? .roundRobin
-        // 缺省与 CPA config.example.yaml 对齐：request-retry=3, max-retry-interval=30, max-retry-credentials=0
-        requestRetry = try container.decodeIfPresent(Int.self, forKey: .requestRetry) ?? 3
+        requestRetry = try container.decodeIfPresent(Int.self, forKey: .requestRetry) ?? 1
         maxRetryInterval = try container.decodeIfPresent(Int.self, forKey: .maxRetryInterval) ?? 30
         maxRetryCredentials = try container.decodeIfPresent(Int.self, forKey: .maxRetryCredentials) ?? 0
-        quotaSwitchProject = try container.decodeIfPresent(Bool.self, forKey: .quotaSwitchProject) ?? true
+        quotaSwitchProject = try container.decodeIfPresent(Bool.self, forKey: .quotaSwitchProject) ?? false
         quotaSwitchPreviewModel = try container.decodeIfPresent(Bool.self, forKey: .quotaSwitchPreviewModel) ?? true
-        quotaAntigravityCredits = try container.decodeIfPresent(Bool.self, forKey: .quotaAntigravityCredits) ?? true
+        quotaAntigravityCredits = try container.decodeIfPresent(Bool.self, forKey: .quotaAntigravityCredits) ?? false
         proxyURL = try container.decodeIfPresent(String.self, forKey: .proxyURL) ?? ""
         enablePlugins = try container.decodeIfPresent(Bool.self, forKey: .enablePlugins) ?? false
         accountModelProbeEnabled = try container.decodeIfPresent(Bool.self, forKey: .accountModelProbeEnabled) ?? true
@@ -271,10 +270,10 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
         // CPA：max-retry-interval<=0 时 shouldRetryAfterError 直接放弃，429 几乎无法换号。
         value.maxRetryInterval = min(max(value.maxRetryInterval, 1), 1_800)
         value.maxRetryCredentials = min(max(value.maxRetryCredentials, 0), 64)
-        // 额度/429 换号是网关应有行为，不开放成用户选项；始终强制开启。
-        value.quotaSwitchProject = true
+        // Tắt tính năng lách project và credits để chống Google quét TOS_VIOLATION.
+        value.quotaSwitchProject = false
         value.quotaSwitchPreviewModel = true
-        value.quotaAntigravityCredits = true
+        value.quotaAntigravityCredits = false
         value.accountModelProbeIntervalSeconds = min(max(value.accountModelProbeIntervalSeconds, 15), 3_600)
         value.proxyURL = value.proxyURL.trimmingCharacters(in: .whitespacesAndNewlines)
         return value

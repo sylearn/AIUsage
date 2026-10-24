@@ -228,7 +228,7 @@ extension ProviderAccountEditorView {
 
     func connectedContent(_ account: ConnectedAccount) -> some View {
         let data = connectedProviderData(account)
-        let windows = Array((data?.windows ?? []).filter { $0.remainingPercent != nil }.prefix(3))
+        let windows = Array((data?.windows ?? []).filter { $0.remainingPercent != nil }.prefix(providerId == "antigravity" ? 5 : 3))
         return VStack(alignment: .leading, spacing: 14) {
             ConnectAccountCard(
                 title: account.title,
