@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import QuotaBackend
 
 /// 所有积分入口共用文案，明确区分数值、可用标记和未返回数据。
@@ -403,20 +404,77 @@ private struct CodexResetActionButtonStyle: ButtonStyle {
     }
 }
 
+/// 9router 风格的一键重置卡胶囊按钮（↻ + 可用张数），悬停提示剩余可用张数。
+struct CodexQuickResetButton: View {
+    let count: Int?
+    let enabled: Bool
+    var isBusy: Bool = false
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    private var availableCount: Int { max(0, count ?? 0) }
+    private var hasCards: Bool { availableCount > 0 && enabled }
+    private var countLabel: String { count.map(String.init) ?? "—" }
+    private var tooltip: String {
+        if let count {
+            return L("Use one Codex reset credit. Available: \(count)", "使用 1 张 Codex 重置卡。可用：\(count)")
+        }
+        return L("Use one Codex reset credit. Available: unknown", "使用 1 张 Codex 重置卡。可用：未知")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3.5) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 8.5, weight: .semibold))
+                Text(countLabel)
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(hasCards ? Color.orange : AppContent.secondary(colorScheme))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                (hasCards ? Color.orange : Color.primary)
+                    .opacity(isHovered && enabled ? 0.18 : (hasCards ? 0.12 : 0.04)),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(
+                        hasCards ? Color.orange.opacity(0.55) : AppStroke.subtle(colorScheme),
+                        lineWidth: 0.8
+                    )
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled || isBusy)
+        .onHover { isHovered = $0 }
+        .help(tooltip)
+        .accessibilityLabel(tooltip)
+    }
+}
+
 /// 账号列表与菜单栏共用的余额摘要；明细消费后会立即反映失效计数。
 struct CodexAccountBalanceSummary: View {
     let provider: ProviderData
     let target: CodexResetCreditsCoordinator.Target
     var onViewCards: (() -> Void)? = nil
+    var onQuickReset: (() -> Void)? = nil
     @ObservedObject private var coordinator = CodexResetCreditsCoordinator.shared
 
-    private var countText: String {
+    private var availableCount: Int? {
         coordinator.availableCount(for: target, summaryCount: provider.codexResetCreditsAvailableCount,
-                                   summaryFetchedAt: provider.fetchedAt).map(String.init) ?? "—"
+                                   summaryFetchedAt: provider.fetchedAt)
     }
+    private var countText: String { availableCount.map(String.init) ?? "—" }
     private var creditText: String { CodexCreditsText.compact(provider.codexCreditsDisplayValue) }
+    private var state: CodexResetCreditsCoordinator.State { coordinator.state(for: target) }
+    private var busy: Bool { state.isLoading || state.isConsuming || state.isRefreshing }
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             if let onViewCards {
                 Button(action: onViewCards) {
                     Label(L("Reset cards ", "重置卡 ") + countText, systemImage: "ticket")
@@ -425,6 +483,14 @@ struct CodexAccountBalanceSummary: View {
                 .help(L("View / use reset cards", "查看 / 使用重置卡"))
             } else {
                 Label(L("Reset cards ", "重置卡 ") + countText, systemImage: "ticket")
+            }
+            if let quickAction = onQuickReset ?? onViewCards {
+                CodexQuickResetButton(
+                    count: availableCount,
+                    enabled: coordinator.canOperate(target),
+                    isBusy: busy,
+                    action: quickAction
+                )
             }
             Label(L("Credits ", "积分 ") + creditText, systemImage: "creditcard")
                 .lineLimit(1).truncationMode(.middle)
@@ -435,102 +501,31 @@ struct CodexAccountBalanceSummary: View {
     }
 }
 
-/// Codex 代理页订阅账号的紧凑入口，复用正式卡片明细与定向刷新。
-struct CodexSubscriptionBalanceControl: View {
-    let provider: ProviderData
-    let accountLabel: String
-    @EnvironmentObject private var refreshCoordinator: ProviderRefreshCoordinator
-    @ObservedObject private var settings = AppSettings.shared
-    @State private var showingDetails = false
+/// Shared confirmation/outcome presenter for quick reset actions across main window and menu bar.
+@MainActor
+final class CodexQuickResetPresenter: ObservableObject {
+    @Published var selectedCard: CodexResetCredit?
+    @Published var confirmedTarget: CodexResetCreditsCoordinator.Target?
+    @Published var showingAlert = false
+    @Published var message = ""
 
-    private var target: CodexResetCreditsCoordinator.Target {
-        .init(identity: CodexAccountIdentity(accountId: provider.accountId, userId: provider.workspaceUserId),
-              credentialID: settings.backendMode == "local" ? refreshCoordinator.credentialID(for: provider) : nil,
-              label: [accountLabel, provider.workspaceLabel, provider.accountId].compactMap { $0?.nilIfBlank }.joined(separator: " · "),
-              isLocal: settings.backendMode == "local")
-    }
-    var body: some View {
-        CodexAccountBalanceSummary(provider: provider, target: target) { showingDetails = true }
-            .popover(isPresented: $showingDetails) {
-                CodexResetCreditsView(target: target, knownCount: provider.codexResetCreditsAvailableCount,
-                                      summaryFetchedAt: provider.fetchedAt, refreshUsage: {
-                    guard let id = refreshCoordinator.credentialID(for: provider) else { return false }
-                    return await refreshCoordinator.refreshCodexAccountAfterReset(credentialId: id, identity: target.identity)
-                }, coordinator: .shared)
-            }
-    }
-}
-
-/// 菜单栏复用同一账号状态和消费流程，常规展示不读取重置卡明细。
-struct CodexMenuBarAccountControl<Content: View>: View {
-    let provider: ProviderData
-    let target: CodexResetCreditsCoordinator.Target
-    let pinned: Bool
-    let togglePin: () -> Void
-    let refreshUsage: () async -> Bool
-    @ViewBuilder let content: () -> Content
-    @ObservedObject private var coordinator = CodexResetCreditsCoordinator.shared
-    @State private var selectedCard: CodexResetCredit?
-    @State private var showingAlert = false
-    @State private var message = ""
-
-    private var state: CodexResetCreditsCoordinator.State { coordinator.state(for: target) }
-    private var busy: Bool { state.isLoading || state.isConsuming || state.isRefreshing }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            content()
-            HStack(spacing: 10) {
-                CodexAccountBalanceSummary(provider: provider, target: target)
-                if busy { ProgressView().controlSize(.mini) }
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: 9))
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-        }
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button {
-                Task { await prepareReset() }
-            } label: {
-                Label(L("Use earliest-expiring reset card…", "使用最早到期的重置卡…"), systemImage: "ticket")
-            }
-            .disabled(busy || !coordinator.canOperate(target))
-            Button {
-                Task {
-                    await coordinator.retryRefresh(target, refresh: refreshUsage)
-                    message = state.refreshFailed || state.listFailed
-                        ? L("Some account data could not be refreshed. Try again.", "部分账号数据刷新失败，请重试。")
-                        : L("Account quota and reset cards refreshed.", "已刷新此账号的配额和重置卡。")
-                    showingAlert = true
-                }
-            } label: {
-                Label(L("Refresh this account", "刷新此账号"), systemImage: "arrow.clockwise")
-            }
-            .disabled(busy || !coordinator.canOperate(target))
-            Divider()
-            Button(action: togglePin) {
-                Label(pinned ? L("Unpin from Menu Bar", "从菜单栏取消固定") : L("Pin to Menu Bar", "固定到菜单栏"),
-                      systemImage: pinned ? "pin.slash" : "pin")
-            }
-        }
-        .alert(selectedCard == nil ? L("Reset cards", "重置卡") : L("Use this reset card?", "确认使用这张重置卡？"), isPresented: $showingAlert) {
-            if let card = selectedCard {
-                Button(L("Cancel", "取消"), role: .cancel) { selectedCard = nil }
-                Button(L("Confirm use", "确认使用")) {
-                    selectedCard = nil
-                    Task { await use(card) }
-                }
-            } else {
-                Button(L("OK", "确定"), role: .cancel) {}
-            }
-        } message: {
-            Text(message)
-        }
+    var alertTitle: String {
+        selectedCard == nil ? L("Reset cards", "重置卡") : L("Use this reset card?", "确认使用这张重置卡？")
     }
 
-    private func prepareReset() async {
+    func cancelSelection() {
+        selectedCard = nil
+        confirmedTarget = nil
+    }
+
+    func prepareReset(
+        for target: CodexResetCreditsCoordinator.Target,
+        coordinator: CodexResetCreditsCoordinator
+    ) async {
         guard let card = await coordinator.prepareEarliestCredit(for: target) else {
+            let state = coordinator.state(for: target)
+            selectedCard = nil
+            confirmedTarget = nil
             message = state.listFailed
                 ? L("Could not load fresh card details. No card was submitted.", "无法读取最新卡片明细，未提交使用。")
                 : L("No usable reset card is available for this account.", "此账号暂无可使用的重置卡。")
@@ -538,6 +533,7 @@ struct CodexMenuBarAccountControl<Content: View>: View {
             return
         }
         selectedCard = card
+        confirmedTarget = target
         let expiry = card.expirationDate.map { $0.formatted(date: .abbreviated, time: .shortened) }
             ?? L("Does not expire", "无到期限制")
         message = [target.label, L("Expires: ", "到期：") + expiry,
@@ -545,8 +541,17 @@ struct CodexMenuBarAccountControl<Content: View>: View {
         showingAlert = true
     }
 
-    private func use(_ card: CodexResetCredit) async {
-        await coordinator.confirm(card, for: target, refresh: refreshUsage)
+    func confirmSelected(
+        fallbackTarget: CodexResetCreditsCoordinator.Target,
+        coordinator: CodexResetCreditsCoordinator,
+        refresh: @escaping () async -> Bool
+    ) async {
+        guard let card = selectedCard else { return }
+        let target = confirmedTarget ?? fallbackTarget
+        selectedCard = nil
+        confirmedTarget = nil
+        await coordinator.confirm(card, for: target, refresh: refresh)
+        let state = coordinator.state(for: target)
         if let error = state.errorCode {
             message = error == "reset_ambiguous"
                 ? L("Result unconfirmed. Refresh this account to check quota and card details.", "结果待确认，请刷新此账号核对配额和卡片明细。")
@@ -564,5 +569,157 @@ struct CodexMenuBarAccountControl<Content: View>: View {
             }
         }
         showingAlert = true
+    }
+}
+
+/// Codex 代理页订阅账号的紧凑入口，复用正式卡片明细与定向刷新。
+struct CodexSubscriptionBalanceControl: View {
+    let provider: ProviderData
+    let accountLabel: String
+    @EnvironmentObject private var refreshCoordinator: ProviderRefreshCoordinator
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var coordinator = CodexResetCreditsCoordinator.shared
+    @StateObject private var quickReset = CodexQuickResetPresenter()
+    @State private var showingDetails = false
+
+    private var target: CodexResetCreditsCoordinator.Target {
+        .init(identity: CodexAccountIdentity(accountId: provider.accountId, userId: provider.workspaceUserId),
+              credentialID: settings.backendMode == "local" ? refreshCoordinator.credentialID(for: provider) : nil,
+              label: [accountLabel, provider.workspaceLabel, provider.accountId].compactMap { $0?.nilIfBlank }.joined(separator: " · "),
+              isLocal: settings.backendMode == "local")
+    }
+
+    private func refreshAccountUsage(for resetTarget: CodexResetCreditsCoordinator.Target) async -> Bool {
+        guard let id = resetTarget.credentialID ?? refreshCoordinator.credentialID(for: provider) else { return false }
+        return await refreshCoordinator.refreshCodexAccountAfterReset(credentialId: id, identity: resetTarget.identity)
+    }
+
+    var body: some View {
+        let currentTarget = target
+        CodexAccountBalanceSummary(
+            provider: provider,
+            target: currentTarget,
+            onViewCards: { showingDetails = true },
+            onQuickReset: {
+                Task { await quickReset.prepareReset(for: currentTarget, coordinator: coordinator) }
+            }
+        )
+        .popover(isPresented: $showingDetails) {
+            CodexResetCreditsView(
+                target: currentTarget,
+                knownCount: provider.codexResetCreditsAvailableCount,
+                summaryFetchedAt: provider.fetchedAt,
+                refreshUsage: { await refreshAccountUsage(for: currentTarget) },
+                coordinator: coordinator
+            )
+        }
+        .alert(quickReset.alertTitle, isPresented: $quickReset.showingAlert) {
+            if quickReset.selectedCard != nil {
+                Button(L("Cancel", "取消"), role: .cancel) { quickReset.cancelSelection() }
+                Button(L("Confirm use", "确认使用")) {
+                    let activeTarget = quickReset.confirmedTarget ?? currentTarget
+                    Task {
+                        await quickReset.confirmSelected(
+                            fallbackTarget: activeTarget,
+                            coordinator: coordinator,
+                            refresh: { await refreshAccountUsage(for: activeTarget) }
+                        )
+                    }
+                }
+            } else {
+                Button(L("OK", "确定"), role: .cancel) {}
+            }
+        } message: {
+            Text(quickReset.message)
+        }
+    }
+}
+
+/// 菜单栏复用同一账号状态和消费流程，常规展示不读取重置卡明细。
+struct CodexMenuBarAccountControl<Content: View>: View {
+    let provider: ProviderData
+    let target: CodexResetCreditsCoordinator.Target
+    let pinned: Bool
+    let togglePin: () -> Void
+    let refreshUsage: () async -> Bool
+    @ViewBuilder let content: () -> Content
+    @ObservedObject private var coordinator = CodexResetCreditsCoordinator.shared
+    @StateObject private var quickReset = CodexQuickResetPresenter()
+    @State private var showingDetails = false
+
+    private var state: CodexResetCreditsCoordinator.State { coordinator.state(for: target) }
+    private var busy: Bool { state.isLoading || state.isConsuming || state.isRefreshing }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            content()
+            HStack(spacing: 10) {
+                CodexAccountBalanceSummary(
+                    provider: provider,
+                    target: target,
+                    onViewCards: { showingDetails = true },
+                    onQuickReset: { Task { await quickReset.prepareReset(for: target, coordinator: coordinator) } }
+                )
+                if busy { ProgressView().controlSize(.mini) }
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+        .popover(isPresented: $showingDetails) {
+            CodexResetCreditsView(
+                target: target,
+                knownCount: provider.codexResetCreditsAvailableCount,
+                summaryFetchedAt: provider.fetchedAt,
+                refreshUsage: refreshUsage,
+                coordinator: coordinator
+            )
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                Task { await quickReset.prepareReset(for: target, coordinator: coordinator) }
+            } label: {
+                Label(L("Use earliest-expiring reset card…", "使用最早到期的重置卡…"), systemImage: "ticket")
+            }
+            .disabled(busy || !coordinator.canOperate(target))
+            Button {
+                Task {
+                    await coordinator.retryRefresh(target, refresh: refreshUsage)
+                    quickReset.cancelSelection()
+                    quickReset.message = state.refreshFailed || state.listFailed
+                        ? L("Some account data could not be refreshed. Try again.", "部分账号数据刷新失败，请重试。")
+                        : L("Account quota and reset cards refreshed.", "已刷新此账号的配额和重置卡。")
+                    quickReset.showingAlert = true
+                }
+            } label: {
+                Label(L("Refresh this account", "刷新此账号"), systemImage: "arrow.clockwise")
+            }
+            .disabled(busy || !coordinator.canOperate(target))
+            Divider()
+            Button(action: togglePin) {
+                Label(pinned ? L("Unpin from Menu Bar", "从菜单栏取消固定") : L("Pin to Menu Bar", "固定到菜单栏"),
+                      systemImage: pinned ? "pin.slash" : "pin")
+            }
+        }
+        .alert(quickReset.alertTitle, isPresented: $quickReset.showingAlert) {
+            if quickReset.selectedCard != nil {
+                Button(L("Cancel", "取消"), role: .cancel) { quickReset.cancelSelection() }
+                Button(L("Confirm use", "确认使用")) {
+                    let activeTarget = quickReset.confirmedTarget ?? target
+                    Task {
+                        await quickReset.confirmSelected(
+                            fallbackTarget: activeTarget,
+                            coordinator: coordinator,
+                            refresh: refreshUsage
+                        )
+                    }
+                }
+            } else {
+                Button(L("OK", "确定"), role: .cancel) {}
+            }
+        } message: {
+            Text(quickReset.message)
+        }
     }
 }

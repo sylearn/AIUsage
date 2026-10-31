@@ -438,7 +438,16 @@ struct CodexResetCardsRegression {
         await load.value
         await confirmation.value
         check(postsWhileLoading == 0, "Confirm at coordinator boundary must reject in-flight detail read")
-        await model.confirm(card, for: target) { true }
+        let presenter = CodexQuickResetPresenter()
+        await presenter.prepareReset(for: target, coordinator: model)
+        check(presenter.selectedCard?.id == "chosen" && presenter.confirmedTarget?.credentialID == target.credentialID && presenter.showingAlert,
+              "Quick reset presenter prepares earliest card and captures confirmed target")
+        presenter.cancelSelection()
+        check(presenter.selectedCard == nil && presenter.confirmedTarget == nil && CoordinatorGateProtocol.postCount == 0,
+              "Canceling quick reset clears selection without submitting POST")
+        await presenter.prepareReset(for: target, coordinator: model)
+        let decoyTarget = CodexResetCreditsCoordinator.Target(identity: .init(accountId: "other", userId: "z"), credentialID: "Z", label: "Decoy", isLocal: true)
+        await presenter.confirmSelected(fallbackTarget: decoyTarget, coordinator: model) { true }
         check(model.state(for: target).list?.availableCount == 0, "Post-consume detail total must be fresh")
         check(model.state(for: target).list?.credits.isEmpty == true, "Consumed card cannot reappear from old detail GET")
         check(CoordinatorGateProtocol.postCount == 1, "Only the explicit confirm after loading sends POST")
