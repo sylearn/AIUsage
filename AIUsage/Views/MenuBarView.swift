@@ -27,6 +27,8 @@ struct MenuBarView: View {
                 Divider()
                 controlDeck
                 Divider()
+                TokenSaverMenuBarSection(onOpenSettings: openTokenSaverSettings)
+                Divider()
                 menuBarContent
                 costTrackingSection
                 Divider()
@@ -302,6 +304,11 @@ struct MenuBarView: View {
         }
     }
 
+    private func openTokenSaverSettings() {
+        CLIProxyGatewayNavigation.shared.showSettings(destination: .tokenSaver)
+        openMainWindow(section: .subscriptionGateway)
+    }
+
     private func openMainWindow(section: AppSection) {
         if let appDelegate = NSApp.delegate as? AppDelegate {
             appDelegate.revealMainWindow(section: section)
@@ -311,6 +318,156 @@ struct MenuBarView: View {
     }
 
     func formatCostCompact(_ usd: Double) -> String { MenuBarHelpers.formatCostCompact(usd) }
+}
+
+// MARK: - Token Saver Menu Bar Quick Controls
+
+struct TokenSaverMenuBarSection: View {
+    @StateObject private var saver: TokenSaverSettingsController
+    private let onOpenSettings: () -> Void
+
+    init(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        rtk: TokenSaverReleaseRTK = .init(),
+        onOpenSettings: @escaping () -> Void
+    ) {
+        _saver = StateObject(wrappedValue: TokenSaverSettingsController(home: home, rtk: rtk))
+        self.onOpenSettings = onOpenSettings
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.purple)
+                Text(L("Token Saver", "Token 节省"))
+                    .font(.system(size: 11, weight: .semibold))
+                let count = saver.settings.enabledToolCount
+                TokenSaverStatusBadge(
+                    text: count > 0 ? L("Enabled \(count)/3", "已启用 \(count)/3") : L("Off", "已关闭"),
+                    tone: count > 0 ? .active : .neutral,
+                    id: "menubar-token-saver-badge"
+                )
+                Spacer(minLength: 4)
+                Button(action: onOpenSettings) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(L("Settings", "设置"))
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.05), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("Open Token Saver settings", "打开 Token 节省设置"))
+                .accessibilityIdentifier("menubar-token-saver-open-settings")
+            }
+
+            HStack(spacing: 6) {
+                toolPill(
+                    title: "RTK",
+                    isOn: saver.settings.rtkEnabled,
+                    id: "menubar-token-saver-rtk"
+                ) {
+                    saver.mutate { $0.rtkEnabled.toggle() }
+                }
+
+                toolPill(
+                    title: "Caveman",
+                    isOn: saver.settings.cavemanEnabled,
+                    id: "menubar-token-saver-caveman"
+                ) {
+                    saver.mutate { $0.cavemanEnabled.toggle() }
+                }
+
+                Menu {
+                    ForEach(TokenSaverSettings.CavemanMode.allCases, id: \.self) { mode in
+                        Button {
+                            saver.mutate { $0.cavemanMode = mode }
+                        } label: {
+                            HStack {
+                                Text(mode.rawValue.capitalized)
+                                if saver.settings.cavemanMode == mode {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Text(saver.settings.cavemanMode.rawValue.capitalized)
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(!saver.settings.cavemanEnabled)
+                .accessibilityLabel(L("Caveman mode", "Caveman 模式"))
+                .accessibilityValue(saver.settings.cavemanMode.rawValue.capitalized)
+                .accessibilityIdentifier("menubar-token-saver-caveman-mode")
+
+                toolPill(
+                    title: "Ponytail",
+                    isOn: saver.settings.ponytailEnabled,
+                    id: "menubar-token-saver-ponytail"
+                ) {
+                    saver.mutate { $0.ponytailEnabled.toggle() }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if let error = saver.localizedError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("menubar-token-saver-error")
+            } else if let notice = saver.notice {
+                Text(notice)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("menubar-token-saver-notice")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("menubar-token-saver-section")
+    }
+
+    private func toolPill(title: String, isOn: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isOn ? Color.green : Color.secondary)
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(isOn ? Color.primary : Color.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3.5)
+            .background(
+                Capsule()
+                    .fill(isOn ? Color.green.opacity(0.14) : Color.primary.opacity(0.05))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(isOn ? Color.green.opacity(0.35) : Color.primary.opacity(0.10), lineWidth: 0.75)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? L("On", "已开启") : L("Off", "已关闭"))
+        .accessibilityIdentifier(id)
+    }
 }
 
 // MARK: - Overall Health Status

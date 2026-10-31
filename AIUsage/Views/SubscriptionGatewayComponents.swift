@@ -50,6 +50,7 @@ enum CLIProxyGatewaySection: String, CaseIterable, Identifiable {
 /// Settings 内部分类跳转目标（与 Settings 侧栏 rawValue 对齐）。
 enum CLIProxyGatewaySettingsDestination: String, Sendable {
     case runtime
+    case tokenSaver
     case keys
     case updates
     case versions
