@@ -43,13 +43,13 @@ strip_bundle_detritus() {
       find -H "$target" -type l -exec xattr -ds "$attr" {} + 2>/dev/null || true
     done
 
-    if ! xattr -lr "$target" 2>/dev/null | rg -q "$attrs_pattern"; then
+    if [[ ! "$(xattr -lr "$target" 2>/dev/null)" =~ $attrs_pattern ]]; then
       return 0
     fi
   done
 
   echo "Failed to strip all detritus from $target" >&2
-  xattr -lr "$target" 2>/dev/null | rg "$attrs_pattern" >&2 || true
+  xattr -lr "$target" >&2 || true
   return 1
 }
 
@@ -271,15 +271,15 @@ ln -s /Applications "$DMG_STAGING_DIR/Applications"
 
 DMG_RW_PATH="$WORK_DIR/${APP_NAME}-rw.dmg"
 
-DMG_SIZE_KB=$(du -sk "$DMG_STAGING_DIR" | awk '{print $1}')
-DMG_SIZE_KB=$(( DMG_SIZE_KB + 10240 ))
+# Let hdiutil account for filesystem overhead instead of a fixed du + 10 MiB.
+# Explicit HFS+ keeps image sizing independent of the runner OS default.
 
 hdiutil create \
   -volname "$APP_NAME" \
   -srcfolder "$DMG_STAGING_DIR" \
   -ov \
   -format UDRW \
-  -size "${DMG_SIZE_KB}k" \
+  -fs HFS+ \
   "$DMG_RW_PATH" >/dev/null
 
 MOUNT_DIR=$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW_PATH" \
