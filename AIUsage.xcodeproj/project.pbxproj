@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9BEFE5B01F5DF04F8E29C1EE /* TokenSaverReleaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2425D87185BEAB90F860DE /* TokenSaverReleaseManager.swift */; };
         C1CS00010000000000000001 /* ClaudeSubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CS00010000000000000002 /* ClaudeSubscriptionManager.swift */; };
         C1CS00020000000000000001 /* ClaudeSubscriptionConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CS00020000000000000002 /* ClaudeSubscriptionConnectionView.swift */; };
         C1CS00030000000000000001 /* ClaudeSubscriptionAccountActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CS00030000000000000002 /* ClaudeSubscriptionAccountActions.swift */; };
@@ -238,6 +239,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		FF2425D87185BEAB90F860DE /* TokenSaverReleaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenSaverReleaseManager.swift; sourceTree = "<group>"; };
         C1CS00010000000000000002 /* ClaudeSubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeSubscriptionManager.swift; sourceTree = "<group>"; };
         C1CS00020000000000000002 /* ClaudeSubscriptionConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeSubscriptionConnectionView.swift; sourceTree = "<group>"; };
         C1CS00030000000000000002 /* ClaudeSubscriptionAccountActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeSubscriptionAccountActions.swift; sourceTree = "<group>"; };
@@ -589,6 +591,7 @@
 		5EFAD7452F87AC7100A15674 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				FF2425D87185BEAB90F860DE /* TokenSaverReleaseManager.swift */,
                 C1CS00010000000000000002 /* ClaudeSubscriptionManager.swift */,
 				C1CPA0022FD0002000B26789 /* CLIProxyPaths.swift */,
 				C1CPA0042FD0003000B26789 /* CLIProxyReleaseClient.swift */,
@@ -905,6 +908,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9BEFE5B01F5DF04F8E29C1EE /* TokenSaverReleaseManager.swift in Sources */,
                 C1CS00010000000000000001 /* ClaudeSubscriptionManager.swift in Sources */,
                 C1CS00020000000000000001 /* ClaudeSubscriptionConnectionView.swift in Sources */,
                 C1CS00030000000000000001 /* ClaudeSubscriptionAccountActions.swift in Sources */,
