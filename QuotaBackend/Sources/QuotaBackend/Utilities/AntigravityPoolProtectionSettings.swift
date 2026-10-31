@@ -14,6 +14,40 @@ public enum AntigravityPoolProtectionSettings {
         return json["enabled"] as? Bool == true
     }
 
+    /// Read-only upgrade attention; malformed/unreadable credentials throw rather
+    /// than incorrectly reporting that previously applied protection is absent.
+    public static func hasResidualProtection(homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path) throws -> Bool {
+        try AntigravityCredentialFile.withLock {
+            let directory = runtime(homeDirectory).appendingPathComponent("auth")
+            let files: [URL]
+            do {
+                files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey])
+            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                return false
+            }
+            var found = false
+            for url in files where url.pathExtension.lowercased() == "json" {
+                guard try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
+                    throw AntigravityPoolCircuitBreaker.Failure.unsafe("Cannot inspect a symlinked credential for previous pool protection.")
+                }
+                let data = try Data(contentsOf: url)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    throw AntigravityPoolCircuitBreaker.Failure.unsafe("Cannot inspect malformed credentials for previous pool protection.")
+                }
+                if json["type"] as? String == "antigravity", json["aiusage_pool_breaker"] != nil { found = true }
+            }
+            return found
+        }
+    }
+
+    /// Explicit recovery also works when the opt-in setting is missing or off.
+    /// Does not enable protection or create/change the setting.
+    public static func restorePreviousExclusions(homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path) throws {
+        try AntigravityCredentialFile.withLock {
+            try AntigravityPoolCircuitBreaker.clearProtection(runtime: runtime(homeDirectory))
+        }
+    }
+
     public static func setEnabled(_ enabled: Bool, homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path) throws {
         try AntigravityCredentialFile.withLock {
             let directory = runtime(homeDirectory)
