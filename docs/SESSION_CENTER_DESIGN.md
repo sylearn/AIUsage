@@ -1,6 +1,6 @@
 # 会话中心 · 设计与实现
 
-> 状态：v1 实现中（分支 `feat/session-center`）
+> 状态：v1 已实现（分支 `feat/session-center`）
 > 范围：Claude Code、Codex、OpenCode 三个 CLI 的本地会话浏览、阅读与一键继续
 > 交互稿：<https://claude.ai/artifact/XntbutQ6BzjyN6Cm87FtUf>（主窗口 + 菜单栏两个画板）
 
@@ -27,8 +27,8 @@
 
 实测细节与由此定下的规则：
 
-- **Claude Code**：一个会话文件里有十几种记录类型（`user`、`assistant`、`ai-title`、`last-prompt`、`pr-link`、`api-request` 等）。`ai-title` 会随对话多次更新，取最后一条。用户消息分四种：普通提问（字符串或 `text` 块）、斜杠命令（`<command-name>` 包裹）、系统注入（`isMeta: true`）、工具结果（`tool_result` 块）。只有前两种算作一轮提问；`<system-reminder>` 片段从正文里去掉。`isSidechain: true` 的记录属于子代理，不进入主时间线。项目目录下的 `memory/`、`<uuid>/tool-results/` 等子目录不是会话。Claude Code 默认只保留 30 天会话（`settings.json` 的 `cleanupPeriodDays` 可调），会话中心只能显示磁盘上还在的记录。
-- **Codex**：本机 175 条会话里，169 条的会话文件已被 Codex 压缩成 `.jsonl.zst`，而 `threads.rollout_path` 仍写着 `.jsonl`。判断能否继续时两种后缀都要认。正文不解析会话文件：`thread_history_1.sqlite` 已经把 153 条会话展开成结构化条目（`userMessage`、`agentMessage`、`commandExecution` 带 `exitCode`、`fileChange` 带路径、`mcpToolCall`、`webSearch` 等），状态只有 `completed` / `failed`。剩下 22 条只有压缩包，界面提示「无法预览，仍可继续」。`source` 里带 `subagent` 的线程（如 guardian 审查）不列出；已归档（`archived = 1`）的 v1 不列出。数据库文件名带版本号，按数字取最大的 `state_*.sqlite` / `thread_history_*.sqlite`，列用 `PRAGMA table_info` 探测，缺列只影响对应字段。
+- **Claude Code**：一个会话文件里有十几种记录类型（`user`、`assistant`、`ai-title`、`last-prompt`、`pr-link`、`api-request` 等）。`ai-title` 会随对话多次更新，取最后一条。用户消息分四种：普通提问（字符串或 `text` 块）、斜杠命令（`<command-name>` 包裹）、系统注入（`isMeta: true`）、工具结果（`tool_result` 块）。只有前两种算作一轮提问；`<system-reminder>` 片段从正文里去掉，`<task-notification>`（后台任务完成时自动注入）、`<local-command-stdout>` 等输出不算提问。会话目录取文件里第一条 `cwd`：会话按开始时的目录存放，`--resume` 必须回到那里，中途 `cd` 不影响。`isSidechain: true` 的记录属于子代理，不进入主时间线。项目目录下的 `memory/`、`<uuid>/tool-results/` 等子目录不是会话。Claude Code 默认只保留 30 天会话（`settings.json` 的 `cleanupPeriodDays` 可调），会话中心只能显示磁盘上还在的记录。
+- **Codex**：本机 175 条会话里，169 条的会话文件已被 Codex 压缩成 `.jsonl.zst`，而 `threads.rollout_path` 仍写着 `.jsonl`。判断能否继续时两种后缀都要认。正文不解析会话文件：`thread_history_1.sqlite` 已经把 153 条会话展开成结构化条目（`userMessage`、`agentMessage`、`commandExecution` 带 `exitCode`、`fileChange` 带路径、`mcpToolCall`、`webSearch` 等），状态只有 `completed` / `failed`。剩下 22 条只有压缩包，界面提示「无法预览，仍可继续」。`source` 里带 `subagent` 的线程（如 guardian 审查）不列出；已归档（`archived = 1`）的 v1 不列出。数据库文件名带版本号，按数字取最大的 `state_*.sqlite` / `thread_history_*.sqlite`，列用 `PRAGMA table_info` 探测，缺列只影响对应字段。`has_user_event` 列实测恒为 0，不能用来判断空线程，改为「没有第一句提问、历史库里也没有提问」才跳过。
 - **OpenCode**：本机是旧版 JSON 存储（7 个会话）。新版 `opencode.db` 有两代表结构：已发布的 `session`/`message`/`part`，以及开发分支里的 `session_v2`/`session_message`/`session_part`。两代都按列探测读取，`parent_id` 非空的子会话不列出。JSON 与数据库同时存在时（升级迁移后的残留），同一个会话 ID 以数据库为准。本机没有数据库样本，数据库路径只用按源码表结构构造的测试库验证过。
 
 ## 3. 架构
@@ -57,6 +57,7 @@ AIUsage/
 
 - Claude：只对 `(路径, 修改时间, 大小)` 变化的文件重新解析，其余复用上次结果。列表解析是流式逐行读，不把整份文件读进内存；单行超过 4 MB 的记录（大块工具输出）直接跳过。
 - Codex / OpenCode 数据库：数据库文件和 `-wal` 文件的修改时间都没变就复用上次结果。以只读模式打开，不复制快照，不加锁。
+- WAL 库的坑：Codex 退出时会删掉 `-wal` / `-shm`，库仍是 WAL 模式，而只读连接无权重建 `-shm`，直接打开会失败（实测：Codex 不在运行时列表为空）。`SessionSQLite` 先按 `mode=ro` 打开，读不了再退回 `immutable=1`；没有 `-wal` 就没有未落盘的内容，不会少读数据。有回归测试覆盖。
 - 缓存只在内存里，不落盘：会话正文不会被复制到 AIUsage 自己的目录。
 
 ### 3.2 搜索
@@ -102,19 +103,23 @@ exec "${SHELL:-/bin/zsh}" -l
 
 ### 4.3 终端
 
-| 终端 | 启动方式 | 说明 |
-|---|---|---|
-| Ghostty | `NSWorkspace.openApplication`，新实例，参数 `-e <脚本>` | 等价于官方推荐的 `open -na Ghostty.app --args -e …`；macOS 上 Ghostty 不支持直接从命令行启动 |
-| 终端（Terminal.app） | `NSWorkspace.open(脚本, withApplicationAt:)` | 系统原生支持 `.command` |
-| Warp | 实测后确定，见第 7 节 | |
+三种终端走同一条路：`NSWorkspace.open([脚本], withApplicationAt: 终端)`。2026-11 在本机实测：
 
-全程不用 AppleScript：App 开着 Hardened Runtime，发送 Apple Events 需要额外的 entitlement 和自动化授权弹窗。默认终端按 Ghostty → Warp → 终端 的顺序取第一个已安装的，用户在「继续」按钮的下拉菜单里改，选择会记住。启动失败时自动把命令复制到剪贴板并提示。
+| 终端 | 结果 |
+|---|---|
+| 终端（Terminal.app） | 直接执行 `.command` |
+| Warp | 直接执行 `.command` |
+| Ghostty 1.3.1 | 先弹「Allow Ghostty to execute …?」确认一次再执行。这是 Ghostty 有意的安全策略（防止被沙盒应用借道执行文件），界面上已提示 |
+
+没有用 Ghostty 的 `open -na Ghostty.app --args -e …`：1.3.1 会把 `-e` 后面的现成路径也当成「要打开的文件」，照样弹确认框并阻塞新实例；Ghostty 源码已修复（`commandLineOpenFileFilter`），等正式版发布后可改走 `-e` 免去确认（见第 8 节）。
+
+全程不用 AppleScript：App 开着 Hardened Runtime，发送 Apple Events 需要额外的 entitlement 和自动化授权弹窗。默认终端按 Ghostty → Warp → 终端 的顺序取第一个已安装的，用户在「继续」按钮旁的下拉菜单里改，选择会记住。启动失败时自动把命令复制到剪贴板并提示。
 
 ## 5. 界面
 
 - **入口**：侧边栏「仪表盘」下方的「会话」，可在设置里隐藏（与其他入口一致）。
-- **列表**：搜索框（⌘F）、工具筛选（全部 / Claude Code / Codex / OpenCode，带数量）、分组（按时间：置顶、今天、昨天、本周、更早；按项目）。行内显示品牌图标、两行标题、项目名与分支、时间 · 轮数 · token。悬停出现「继续」按钮；右键菜单有继续、复制命令、复制会话 ID、在 Finder 中显示。↑↓ 选择，↩ 继续。
-- **阅读视图**：顶部是工具、会话 ID、标题和元信息标签（目录、分支、模型、轮数与 token、更新时间），右上角是复制命令、在 Finder 中显示、导出 Markdown 和「在 Ghostty 中继续」（带终端选择）。正文提问靠右、回复靠左，步骤组默认折叠，有失败的组默认展开并用橙色标出。
+- **列表**：搜索框（⌘F，Esc 清空）、工具筛选（全部 / Claude / Codex / OpenCode，悬停显示数量）、分组（按时间：置顶、今天、昨天、本周、更早；按项目）。行内显示品牌图标、两行标题、项目名与分支、时间 · 轮数。选中与悬停用 `AppSurface` 色阶自绘（系统 List 的失焦选中色在浅色下是黑底，和本应用风格不符），组标题吸顶。悬停出现「继续」按钮；右键菜单有继续、复制命令、复制会话 ID、在 Finder 中显示、导出 Markdown。↑↓ 选择并自动滚到可见，↩ 继续。
+- **阅读视图**：顶部是工具、会话 ID、标题和元信息标签（目录、分支、模型、轮数、token、更新时间），右上角依次是复制命令、更多（Finder、导出等）、「在 Ghostty 中继续」主按钮（⌘↩）和终端选择。token 是工具记录的累计数，含缓存读取，所以只放在这里并加说明，不进列表。正文提问靠右、回复靠左；回复里的代码块用等宽底色块显示，`-` 列表换成「•」，标题行加粗，其余按行内 Markdown 渲染。步骤组默认折叠，有失败的组默认展开并用橙色标出。
 - **大纲**：窗口足够宽时显示在右侧，列出每一轮提问，点击跳转；底部是轮数、工具调用、改动文件、失败次数四个统计。
 - **菜单栏**：额度区下方的「最近会话」，最多 4 条，可折叠（状态记住），点行打开会话中心并选中，点右侧按钮直接继续。
 - 浅色、深色两种外观都使用 `AppSurfaceTokens` 里的色阶；品牌色只用在图标上。
@@ -127,10 +132,15 @@ exec "${SHELL:-/bin/zsh}" -l
 
 ## 7. 测试
 
-- `QuotaBackend/Tests/QuotaBackendTests/SessionCatalogTests.swift`：用脱敏样本覆盖三家的列表与正文解析——Claude 标题优先级、meta/命令/工具结果区分、子代理过滤、失败步骤；Codex 列探测、子代理与归档过滤、`.zst` 识别、条目映射；OpenCode JSON 存储与两代数据库表结构、子会话过滤、去重。
-- 继续命令：ID 校验、单引号转义（含 `'` 的路径）、各工具参数。
-- Markdown 导出：结构与转义。
-- 真机验证：本机三家真实数据的扫描耗时与数量；Ghostty、终端、Warp 三种启动各实测一次；浅色、深色截图核对。
+- `QuotaBackend/Tests/QuotaBackendTests/SessionCatalogTests.swift`（10 项），样本在 `Fixtures/sessions/`：
+  - Claude：标题优先级、只数真实提问（排除 meta、工具结果、命令输出、任务通知、子代理）、开始目录、usage 去重、正文分组与失败回填、增量缓存；
+  - Codex：只读最新版本的库、归档 / guardian / 空线程过滤、`.zst` 记录、历史库条目映射与失败识别；
+  - OpenCode：JSON 存储、v1 库（与 JSON 去重、子会话与归档过滤）、v2 库内联内容；
+  - WAL 库在伴随文件被删后仍可读（去掉修复时该测试失败，已验证）；
+  - 继续命令：ID 校验、单引号转义（含 `'` 的路径）、各工具参数；Markdown 导出。
+- 真机数据（2026-11-01）：Claude 5、Codex 150、OpenCode 7 个会话；首次扫描约 370 ms，之后增量约 2 ms；最长的 Claude 会话正文加载约 100 ms。
+- 界面：用离屏渲染（与 `run_codex_reset_cards_regression.sh --render` 同法）以真实数据出浅色、深色、窄窗口和菜单栏截图逐项核对。
+- 终端：终端、Warp 实测执行脚本；Ghostty 实测会弹确认（见 §4.3）。
 
 ## 8. 后续优化与拓展
 
@@ -146,3 +156,5 @@ exec "${SHELL:-/bin/zsh}" -l
 8. **思考过程与图片**：可选显示 thinking/reasoning 摘要，内联显示截图类附件。
 9. **Codex 压缩会话预览**：引入 zstd 解码（体积约 300 KB）后，可预览只有 `.jsonl.zst` 的 22 条会话。
 10. **全局快捷键**：⌥⌘S 唤出最近会话浮窗。
+11. **Ghostty 免确认**：Ghostty 修复 `-e` 路径误判的版本发布后，改用 `open -na Ghostty.app --args -e zsh -ilc …` 直接执行（按 Ghostty 版本号切换）。
+12. **会话内搜索**：阅读视图里查找并高亮，配合大纲跳转。
