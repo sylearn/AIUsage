@@ -16,6 +16,7 @@
 {"type":"user","cwd":"__HOME__/app/sub","gitBranch":"main","timestamp":"2026-10-30T08:10:00.000Z","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"}}
 {"type":"user","cwd":"__HOME__/app/sub","gitBranch":"main","timestamp":"2026-10-30T08:10:01.000Z","message":{"role":"user","content":"<local-command-stdout>Set model to opus</local-command-stdout>"}}
 {"type":"user","cwd":"__HOME__/app/sub","gitBranch":"main","timestamp":"2026-10-30T08:11:00.000Z","message":{"role":"user","content":"<bash-input>git status</bash-input>"}}
+{"type":"user","cwd":"__HOME__/app/sub","gitBranch":"main","timestamp":"2026-10-30T08:11:30.000Z","message":{"role":"user","content":"<task-notification>\n<task-id>bckenj0mb</task-id>\n<status>completed</status>\n</task-notification>"}}
 {"type":"user","cwd":"__HOME__/app/sub","gitBranch":"main","timestamp":"2026-10-30T08:12:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
 {"type":"user","isCompactSummary":true,"cwd":"__HOME__/app/sub","gitBranch":"main","timestamp":"2026-10-30T08:30:00.000Z","message":{"role":"user","content":"This session is being continued from a previous conversation."}}
 {"type":"user","cwd":"__HOME__/app/sub","gitBranch":"feat/login","timestamp":"2026-10-30T09:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Now add a test"},{"type":"image","source":{"type":"base64","data":""}}]}}

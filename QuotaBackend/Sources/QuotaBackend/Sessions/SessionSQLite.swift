@@ -2,7 +2,9 @@ import Foundation
 import SQLite3
 
 // MARK: - Session Center · Read-only SQLite
-// 以 SQLITE_OPEN_READONLY 打开原工具的数据库：不复制、不加写锁，WAL 模式下也能与原工具并发读。
+// 以只读模式打开原工具的数据库：不复制、不加写锁，WAL 模式下也能与原工具并发读。
+// 原工具退出后会删掉 -wal / -shm，而只读连接无权重建 -shm，WAL 库会打不开（实测 Codex 退出后即如此）；
+// 此时退回 immutable=1：没有 -wal 就没有未落盘的内容，不会少读数据。
 // 列名按 PRAGMA table_info 探测，表结构升级时缺列只影响对应字段。
 
 final class SessionSQLite {
@@ -10,11 +12,19 @@ final class SessionSQLite {
 
     init?(path: String) {
         guard FileManager.default.fileExists(atPath: path),
-              sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            return nil
+              let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        for query in ["mode=ro", "mode=ro&immutable=1"] {
+            var handle: OpaquePointer?
+            let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
+            if sqlite3_open_v2("file:\(encoded)?\(query)", &handle, flags, nil) == SQLITE_OK,
+               sqlite3_exec(handle, "SELECT count(*) FROM sqlite_master", nil, nil, nil) == SQLITE_OK {
+                db = handle
+                sqlite3_busy_timeout(db, 1_000)
+                return
+            }
+            sqlite3_close(handle)
         }
-        sqlite3_busy_timeout(db, 1_000)
+        return nil
     }
 
     deinit {

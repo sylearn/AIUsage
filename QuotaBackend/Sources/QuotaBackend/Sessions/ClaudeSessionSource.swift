@@ -215,7 +215,9 @@ final class ClaudeSessionSource {
         if let input = tag("bash-input", in: trimmed) {
             return .text("! " + input)
         }
-        for noise in ["<local-command-", "<bash-stdout>", "<bash-stderr>", "<command-message>"] where trimmed.hasPrefix(noise) {
+        // 命令输出与 Claude Code 自动注入的后台任务通知不是用户提问。
+        for noise in ["<local-command-", "<bash-stdout>", "<bash-stderr>", "<command-message>", "<task-notification>"]
+        where trimmed.hasPrefix(noise) {
             return nil
         }
         let text = SessionText.clean(trimmed)

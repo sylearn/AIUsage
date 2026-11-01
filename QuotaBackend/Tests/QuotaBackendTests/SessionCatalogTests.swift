@@ -160,6 +160,23 @@ final class SessionCatalogTests: XCTestCase {
         XCTAssertEqual(transcript.stats, TranscriptStats(prompts: 2, toolCalls: 5, failures: 2, filesChanged: 1))
     }
 
+    func testReadsWALDatabaseAfterOwnerRemovedSidecarFiles() throws {
+        // Codex 退出时会删掉 -wal / -shm，库仍是 WAL 模式；只读连接不能重建 -shm，必须退回 immutable。
+        let path = home + "/wal.sqlite"
+        let db = try openWritable(path)
+        try exec(db, "PRAGMA journal_mode=WAL; CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('kept');")
+        sqlite3_close(db)
+        // 系统 SQLite 默认保留 WAL 伴随文件；按 Codex 自带 SQLite 的行为手动删掉（关闭后 -wal 已清空）。
+        try? FileManager.default.removeItem(atPath: path + "-wal")
+        try? FileManager.default.removeItem(atPath: path + "-shm")
+
+        let reader = try XCTUnwrap(SessionSQLite(path: path))
+        var values: [String] = []
+        XCTAssertTrue(reader.query("SELECT v FROM t") { values.append($0.string("v") ?? "") })
+        XCTAssertEqual(values, ["kept"])
+        XCTAssertNil(SessionSQLite(path: home + "/missing.sqlite"))
+    }
+
     // MARK: OpenCode
 
     func testOpenCodeJSONStorage() throws {
