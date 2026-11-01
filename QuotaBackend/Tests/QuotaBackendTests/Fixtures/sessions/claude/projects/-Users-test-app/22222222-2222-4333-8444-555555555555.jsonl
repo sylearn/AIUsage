@@ -1,0 +1,2 @@
+{"type":"user","isMeta":true,"cwd":"__HOME__/app","timestamp":"2026-10-29T08:00:00.000Z","message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}
+{"type":"ai-title","aiTitle":"Session without prompts","sessionId":"22222222-2222-4333-8444-555555555555"}

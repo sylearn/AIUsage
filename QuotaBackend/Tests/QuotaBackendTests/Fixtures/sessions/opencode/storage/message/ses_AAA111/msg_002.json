@@ -1,0 +1,1 @@
+{"id":"msg_002","sessionID":"ses_AAA111","role":"assistant","modelID":"gpt-5.5","providerID":"openai","time":{"created":1767423010000},"tokens":{"input":100,"output":50,"reasoning":0,"cache":{"read":10,"write":0}}}

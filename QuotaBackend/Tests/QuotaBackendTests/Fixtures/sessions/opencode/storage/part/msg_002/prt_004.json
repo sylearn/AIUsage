@@ -1,0 +1,1 @@
+{"id":"prt_004","messageID":"msg_002","sessionID":"ses_AAA111","type":"tool","tool":"bash","callID":"call_1","state":{"status":"error","input":{"command":"ls missing"},"error":"No such file or directory"}}
