@@ -645,7 +645,6 @@ struct CodexMenuBarAccountControl<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @ObservedObject private var coordinator = CodexResetCreditsCoordinator.shared
     @StateObject private var quickReset = CodexQuickResetPresenter()
-    @State private var showingDetails = false
 
     private var state: CodexResetCreditsCoordinator.State { coordinator.state(for: target) }
     private var busy: Bool { state.isLoading || state.isConsuming || state.isRefreshing }
@@ -656,7 +655,6 @@ struct CodexMenuBarAccountControl<Content: View>: View {
                 CodexAccountBalanceSummary(
                     provider: provider,
                     target: target,
-                    onViewCards: { showingDetails = true },
                     onQuickReset: { Task { await quickReset.prepareReset(for: target, coordinator: coordinator) } }
                 )
                 if busy { ProgressView().controlSize(.mini) }
@@ -666,15 +664,7 @@ struct CodexMenuBarAccountControl<Content: View>: View {
             .foregroundStyle(.secondary)
             .monospacedDigit()
         }
-        .popover(isPresented: $showingDetails) {
-            CodexResetCreditsView(
-                target: target,
-                knownCount: provider.codexResetCreditsAvailableCount,
-                summaryFetchedAt: provider.fetchedAt,
-                refreshUsage: refreshUsage,
-                coordinator: coordinator
-            )
-        }
+        // 菜单栏宿主是 transient NSPopover，嵌套系统 popover 不可靠；完整卡片明细留在订阅页。
         .contentShape(Rectangle())
         .contextMenu {
             Button {
