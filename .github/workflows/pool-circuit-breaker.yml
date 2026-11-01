@@ -31,5 +31,6 @@ jobs:
           bash scripts/run_global_proxy_cancellation_regression.sh
           bash scripts/run_common_config_regression.sh
           bash scripts/run_proxy_usage_archive_regression.sh
+          bash scripts/run_claude_desktop_regression.sh
       - name: Opt-in pool protection offline regression
         run: bash scripts/run_pool_circuit_breaker_regression.sh
