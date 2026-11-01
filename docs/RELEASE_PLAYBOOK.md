@@ -275,7 +275,13 @@ xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release \
 - `package-release.sh` 在 staging 完成后按 inside-out 顺序：先用宿主 identity 签 Sparkle 的 Autoupdate / Updater / XPCServices，再签被本地化修改的 Sparkle.framework，再签 `Contents/Helpers/QuotaServer`，最后签外层 App；helper、App、Autoupdate 共用 `MACOS_SIGNING_IDENTITY`，三者的 certificate leaf 一致是硬失败条件（P0 自动更新）。
 - release workflow 会重新解压最终 ZIP，断言新 helper 路径存在、旧 resource 路径不存在，并对 helper 单独执行 `codesign --verify --strict --verbose=2`；同时断言 Autoupdate 与外层 App 的 certificate leaf 相同。
 
-如需在 Apple Silicon 上验证 x86_64 切片：`arch -x86_64 <binary>`（Rosetta）。背景与细节见 `docs/UNIVERSAL_BINARY_AND_SIDEBAR.md`。
+如需在 Apple Silicon 上验证 x86_64 切片：`arch -x86_64 <binary>`（Rosetta）。
+
+常见疑问：
+
+- **「未来不支持 / Rosetta」弹窗**：只有实际经 Rosetta 翻译执行的进程才会触发（macOS 26.4 起）。Universal 包在 M 芯片上原生运行 arm64 切片，不会触发；用 `arch -x86_64` 做冒烟测试时出现的弹窗属于测试行为。
+- **不拆成 arm64 / x86_64 两个包**：Sparkle 同一版本只能挂一个 enclosure，拆包要双 feed、双签名、双 appcast，还要先发过渡版本分流，收益只是包体减半。所有用户走同一条 appcast，系统自动执行本机架构的切片。
+- **Debug 构建的 codesign detritus 报错**：DerivedData 放在 iCloud 同步目录（如 `Desktop`）下时，`com.apple.fileprovider.fpfs#P` 扩展属性会让 codesign 失败；改用 `~/Library/Developer/` 下的 DerivedData。发布脚本的 `strip_bundle_detritus` 已处理，不受影响。
 
 ## 最短手顺
 
