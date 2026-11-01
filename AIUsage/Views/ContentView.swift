@@ -161,6 +161,9 @@ struct ContentView: View {
                 case .dashboard:
                     DashboardView()
                         .navigationTitle(L("Dashboard", "仪表盘"))
+                case .sessions:
+                    SessionCenterView()
+                        .navigationTitle(L("Sessions", "会话", key: "nav.sessions"))
                 case .providerAccounts:
                     ProvidersView(category: .accounts)
                         .navigationTitle(L("Subscriptions", "订阅账号"))

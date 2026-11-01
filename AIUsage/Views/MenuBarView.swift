@@ -29,6 +29,7 @@ struct MenuBarView: View {
                 Divider()
                 menuBarContent
                 costTrackingSection
+                MenuBarRecentSessionsSection { openMainWindow(section: .sessions) }
                 Divider()
                 menuBarFooter
             }
