@@ -37,19 +37,26 @@ public struct SessionEnvironment: Sendable {
 }
 
 /// 文件指纹：修改时间与大小都没变就复用上次的解析结果。
+/// inode 用来区分「原文件追加」和「换了一个文件」（后者不能接着上次的位置读）。
 struct FileFingerprint: Hashable, Sendable {
-    let modified: Date
-    let size: Int
+    let inode: UInt64
+    let size: UInt64
+    /// 修改时间，纳秒。
+    let modified: Int64
 
     init?(path: String) {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-              let modified = attributes[.modificationDate] as? Date else { return nil }
-        self.modified = modified
-        self.size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        inode = UInt64(info.st_ino)
+        size = UInt64(max(0, info.st_size))
+        modified = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
     }
 }
 
 enum SessionText {
+    /// 没有进程登记的工具（Codex、OpenCode）按记录推断「进行中」：最后一次动静超过这么久就不算了，
+    /// 免得崩溃后残留的未完成记录一直显示进行中。
+    static let activityWindow: TimeInterval = 30 * 60
     static let maxMessageLength = 20_000
     static let maxSearchLength = 8_192
 
@@ -180,7 +187,10 @@ struct TranscriptBuilder {
         groups[location.group][location.index].failureNote = note
     }
 
-    func build(limit: Int = 3_000) -> SessionTranscript {
+    /// 阅读视图最多渲染的条目数；全文索引不设上限。
+    static let renderLimit = 3_000
+
+    func build(limit: Int = TranscriptBuilder.renderLimit) -> SessionTranscript {
         let all: [(TranscriptEntry, Date?)] = drafts.map { draft in
             switch draft {
             case .entry(let entry, let date): return (entry, date)

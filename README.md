@@ -117,7 +117,7 @@
 | **CPA Gateway** | Run the official CLIProxyAPI as a managed local gateway: one OAuth account pool, live model discovery, multi-protocol APIs, optional LAN access, and one-click connections to Codex, Claude Code / Science, and OpenCode |
 | **Global Proxy** | One fixed local endpoint per agent — hot-swap the active upstream node with zero CLI restart, per-node cost attribution, and automatic cross-track port arbitration |
 | **Unified API Providers** | Configure one upstream (Base URL, format, key, model library/pricing) once and distribute it to Codex / Claude / OpenCode at once; linked nodes inherit from the master and sync on change, with per-field local overrides |
-| **Session Center** | Browse Claude Code, Codex & OpenCode history in one place — search titles, folders, branches and prompts, read full conversations, resume in your terminal with one click; read-only, nothing uploaded |
+| **Session Center** | Browse Claude Code, Codex & OpenCode history in one place — search titles, prompts and (optionally) full replies and tool calls, see which sessions are running right now, read full conversations, resume in your terminal with one click; read-only, nothing uploaded |
 | **Call Analytics** | Count MCP / Skill / tool calls across Claude Code, Codex & OpenCode from local session logs — Top-N rankings, daily trend, and per-app zero-call ("zombie" skill/MCP) detection; read-only, zero instrumentation |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, per-proxy node switchers, quick-glance popover, colored progress bars |
 | **Credential Vault** | macOS Keychain storage for all managed credentials |
@@ -298,11 +298,13 @@ Usage and billing details for Claude Code and Codex are documented in [docs/USAG
 
 ## Session Center
 
-Your coding-CLI history in one place. Open **Sessions** in the sidebar or **Recent Sessions** in the menu bar. Everything is read from local records only: nothing is uploaded, and the tools' own files are never modified.
+Your coding-CLI history in one place. Open **Sessions** in the sidebar or **Recent Sessions** in the menu bar. Everything is read from local records only: nothing is uploaded, and the tools' own files are never modified. While either view is open it follows the tools' files and updates within a couple of seconds.
 
 | Capability | What it does |
 |------------|-------------|
 | **One list** | Claude Code, Codex and OpenCode sessions grouped by time (pinned, today, yesterday, this week, earlier) or by project; search titles, folders, branches, session IDs and prompts |
+| **Full-text search** (opt-in) | Also search replies and tool calls (commands, file paths, error messages). Results show the matching line; opening one jumps to it with the words highlighted. Works for Chinese without spaces. The index lives in `~/Library/Caches/AIUsage` and is deleted when you turn it off |
+| **In progress** | Sessions open in a running Claude Code process are marked *In progress* or *Waiting for input*; Codex and OpenCode sessions with an unfinished turn are marked too. Resuming one asks first, since two processes would write to the same session |
 | **Reading view** | Prompts and replies laid out separately, tool calls folded into one-line summaries (steps, files read and changed), failed steps highlighted with their error; outline on the right to jump between turns |
 | **One-click resume** | Continue the session from its original project folder in Terminal, iTerm2, Ghostty, Warp, WezTerm, Kaku, kitty or Alacritty (installed ones are listed); or copy the resume command, or export Markdown |
 | **Menu bar** | The 4 most recent sessions, resumable without opening the main window |

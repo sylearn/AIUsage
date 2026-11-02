@@ -44,16 +44,21 @@ public final class SessionCatalog: @unchecked Sendable {
         }
     }
 
+    /// 阅读视图用：最多 3 000 条，Claude Code 会话记住解析进度。
     public func transcript(for summary: SessionSummary) throws -> SessionTranscript {
+        try transcript(for: summary, limit: TranscriptBuilder.renderLimit, cached: true)
+    }
+
+    func transcript(for summary: SessionSummary, limit: Int, cached: Bool) throws -> SessionTranscript {
         let home = environment.homeDirectory
         switch summary.locator {
         case .claudeFile(let path):
-            return try ClaudeSessionSource.transcript(path: path, home: home)
+            return try claude.transcript(path: path, home: home, limit: limit, cached: cached)
         case .codexThread(let historyDatabase):
             return try CodexSessionSource.transcript(
-                threadID: summary.sessionID, historyPath: historyDatabase, base: summary.directory, home: home)
+                threadID: summary.sessionID, historyPath: historyDatabase, base: summary.directory, home: home, limit: limit)
         case .openCodeJSON, .openCodeDatabase:
-            return try OpenCodeSessionSource.transcript(summary: summary, home: home)
+            return try OpenCodeSessionSource.transcript(summary: summary, home: home, limit: limit)
         }
     }
 }
