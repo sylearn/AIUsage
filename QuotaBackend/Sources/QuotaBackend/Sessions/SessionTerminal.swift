@@ -5,8 +5,9 @@ import Foundation
 // 每个终端的行为都实测过或读源码确认过（2026-11），见 docs/SESSION_CENTER_DESIGN.md §4.3。
 //
 // - openScript：用该终端打开脚本，在已运行的实例里开新窗口。iTerm2 首次、Ghostty 每次会先请用户确认。
-// - newInstance：新开一个实例，通过启动参数运行脚本，窗口关掉后实例退出。
-//   只用于不能打开脚本（Alacritty）或打开脚本每次都要确认（kitty）、且没有窗口恢复的终端；
+// - newInstance：新开一个进程，通过启动参数运行脚本。
+//   WezTerm / Kaku 用 `start`：没在运行时由新进程开第一个窗口，已在运行时转交给原实例后退出
+//   （打开脚本在冷启动时会被它丢掉，实测）。kitty、Alacritty 是独立实例，窗口关掉后退出。
 //   Ghostty 不走这条路：新实例会恢复用户保存的窗口，退出时还会覆盖保存的布局。
 //   脚本路径包在 `/bin/sh -c` 的字符串里，不单独作为参数：macOS 会把启动参数里现成的文件路径当成「打开文件」请求。
 
@@ -48,7 +49,9 @@ public enum SessionTerminal: String, CaseIterable, Identifiable, Sendable {
             return .newInstance(arguments: ["-o", "macos_quit_when_last_window_closed=yes"] + Self.runScript(scriptPath))
         case .alacritty:
             return .newInstance(arguments: ["-e"] + Self.runScript(scriptPath))
-        case .ghostty, .iterm2, .warp, .wezterm, .kaku, .terminal:
+        case .wezterm, .kaku:
+            return .newInstance(arguments: ["start", "--"] + Self.runScript(scriptPath))
+        case .ghostty, .iterm2, .warp, .terminal:
             return .openScript
         }
     }

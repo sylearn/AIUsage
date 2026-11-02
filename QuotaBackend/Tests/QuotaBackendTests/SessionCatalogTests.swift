@@ -311,7 +311,7 @@ final class SessionCatalogTests: XCTestCase {
         XCTAssertEqual(SessionTerminal.allCases.last, .terminal, "系统终端只做兜底")
         XCTAssertEqual(Set(SessionTerminal.allCases.map(\.bundleIdentifier)).count, SessionTerminal.allCases.count)
 
-        for terminal in [SessionTerminal.ghostty, .iterm2, .warp, .wezterm, .kaku, .terminal] {
+        for terminal in [SessionTerminal.ghostty, .iterm2, .warp, .terminal] {
             XCTAssertEqual(terminal.launchMethod(scriptPath: "/tmp/x.command"), .openScript, terminal.rawValue)
         }
     }
@@ -325,7 +325,7 @@ final class SessionCatalogTests: XCTestCase {
             .write(toFile: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script)
 
-        for terminal in [SessionTerminal.kitty, .alacritty] {
+        for terminal in [SessionTerminal.wezterm, .kaku, .kitty, .alacritty] {
             guard case .newInstance(let arguments) = terminal.launchMethod(scriptPath: script) else {
                 return XCTFail("\(terminal.rawValue) 应新开实例")
             }
@@ -342,8 +342,12 @@ final class SessionCatalogTests: XCTestCase {
             XCTAssertEqual(try String(contentsOfFile: marker, encoding: .utf8), script, terminal.rawValue)
         }
 
-        guard case .newInstance(let kitty) = SessionTerminal.kitty.launchMethod(scriptPath: script),
+        guard case .newInstance(let wezterm) = SessionTerminal.wezterm.launchMethod(scriptPath: script),
+              case .newInstance(let kaku) = SessionTerminal.kaku.launchMethod(scriptPath: script),
+              case .newInstance(let kitty) = SessionTerminal.kitty.launchMethod(scriptPath: script),
               case .newInstance(let alacritty) = SessionTerminal.alacritty.launchMethod(scriptPath: script) else { return }
+        XCTAssertEqual(Array(wezterm.prefix(2)), ["start", "--"], "start 在 WezTerm 已运行时会转交给原实例")
+        XCTAssertEqual(kaku, wezterm)
         XCTAssertEqual(Array(kitty.prefix(2)), ["-o", "macos_quit_when_last_window_closed=yes"])
         XCTAssertEqual(alacritty.first, "-e", "Alacritty 的 -e 必须是最后一个选项，后面整段都是命令")
     }
