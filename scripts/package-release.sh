@@ -271,16 +271,25 @@ ln -s /Applications "$DMG_STAGING_DIR/Applications"
 
 DMG_RW_PATH="$WORK_DIR/${APP_NAME}-rw.dmg"
 
-DMG_SIZE_KB=$(du -sk "$DMG_STAGING_DIR" | awk '{print $1}')
-DMG_SIZE_KB=$(( DMG_SIZE_KB + 10240 ))
+# Filesystem metadata (journal, catalog) takes part of the image, so a fixed
+# 10 MB margin ran out once the app grew (0.16.0 CI: "No space left on
+# device"). Reserve 20% + 20 MB; the final UDZO image compresses the free
+# space away, so the margin costs almost nothing in the shipped DMG.
+DMG_CONTENT_KB=$(du -sk "$DMG_STAGING_DIR" | awk '{print $1}')
+DMG_SIZE_KB=$(( DMG_CONTENT_KB + DMG_CONTENT_KB / 5 + 20480 ))
+echo "DMG content: ${DMG_CONTENT_KB} KB, image size: ${DMG_SIZE_KB} KB"
 
-hdiutil create \
+if ! hdiutil create \
   -volname "$APP_NAME" \
   -srcfolder "$DMG_STAGING_DIR" \
   -ov \
   -format UDRW \
   -size "${DMG_SIZE_KB}k" \
-  "$DMG_RW_PATH" >/dev/null
+  "$DMG_RW_PATH" >/dev/null; then
+  echo "hdiutil create failed (content ${DMG_CONTENT_KB} KB, image ${DMG_SIZE_KB} KB). Free space in the work directory:" >&2
+  df -h "$WORK_DIR" >&2 || true
+  exit 1
+fi
 
 MOUNT_DIR=$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW_PATH" \
   | grep "/Volumes/$APP_NAME" | awk -F'\t' '{print $NF}')
