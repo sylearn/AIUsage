@@ -474,12 +474,17 @@ private struct StepGroupView: View {
     init(steps: [ToolStep], terms: [String]) {
         self.steps = steps
         self.terms = terms
-        let hit = !terms.isEmpty && steps.contains { step in
-            terms.contains { term in
-                [step.name, step.detail, step.failureNote ?? ""].contains { $0.range(of: term, options: .caseInsensitive) != nil }
+        _expanded = State(initialValue: steps.contains(where: \.failed) || Self.matches(steps, terms: terms))
+    }
+
+    private static func matches(_ steps: [ToolStep], terms: [String]) -> Bool {
+        for step in steps {
+            let text = [step.name, step.detail, step.failureNote ?? ""].joined(separator: " ")
+            for term in terms where text.range(of: term, options: .caseInsensitive) != nil {
+                return true
             }
         }
-        _expanded = State(initialValue: hit || steps.contains(where: \.failed))
+        return false
     }
 
     private var failures: Int { steps.filter(\.failed).count }

@@ -88,7 +88,9 @@ final class SessionCenterStore: ObservableObject {
     private var observers = 0
     private var pendingRefresh: Task<Void, Never>?
     private lazy var monitor = SessionSourceMonitor { [weak self] in
-        Task { @MainActor in self?.sourcesChanged() }
+        // 回调在监听队列上：先取强引用，再回主线程。
+        guard let self else { return }
+        Task { @MainActor in self.sourcesChanged() }
     }
     private var searchIndex: SessionSearchIndex?
     private var indexTask: Task<Void, Never>?
@@ -293,20 +295,18 @@ final class SessionCenterStore: ObservableObject {
 
     func select(_ id: String?) {
         // 从全文搜索结果点进来：阅读视图滚到命中的那一条。
-        let hit = id.flatMap { id in sessions.first { $0.id == id } }.flatMap { session in
-            excerpt(for: session).map { (sessionID: session.id, itemID: $0.itemID) }
-        }
-        func nextFocus(_ hit: (sessionID: String, itemID: Int)) -> TranscriptFocus {
+        var target: TranscriptFocus?
+        if let id, let session = sessions.first(where: { $0.id == id }), let match = excerpt(for: session) {
             focusCounter += 1
-            return TranscriptFocus(sessionID: hit.sessionID, itemID: hit.itemID, token: focusCounter)
+            target = TranscriptFocus(sessionID: session.id, itemID: match.itemID, token: focusCounter)
         }
         guard id != selectedID || transcriptState == .idle else {
             // 已经选中的会话：换了搜索词或再点一次，只滚到命中处，不重新加载。
-            if let hit { focus = nextFocus(hit) }
+            if let target { focus = target }
             return
         }
         selectedID = id
-        focus = hit.map(nextFocus)
+        focus = target
         guard let session = selectedSession else {
             transcriptTask?.cancel()
             transcriptState = .idle
@@ -579,8 +579,8 @@ final class SessionCenterStore: ObservableObject {
     }
 }
 
-/// 跨线程的取消标记：后台建索引时在两个会话之间检查。
-private final class CancellationFlag: @unchecked Sendable {
+/// 跨线程的取消标记：后台建索引时在两个会话之间检查（App 默认 MainActor 隔离，这里显式 nonisolated）。
+private nonisolated final class CancellationFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
 

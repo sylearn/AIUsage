@@ -63,7 +63,8 @@ public final class SessionSearchIndex: @unchecked Sendable {
         progress: ((SessionIndexProgress) -> Void)? = nil,
         isCancelled: () -> Bool = { false }
     ) -> Bool {
-        guard let indexed = locked({ versions() }) ?? nil else { return false }
+        // locked 在索引已删除时返回 nil；versions 在打不开库时返回 nil。
+        guard let opened = locked({ versions() }), let indexed = opened else { return false }
         let current = Set(sessions.map(\.id))
         let stale = indexed.keys.filter { !current.contains($0) }
         var changed = false
@@ -167,7 +168,8 @@ public final class SessionSearchIndex: @unchecked Sendable {
     public func search(_ query: String, in sessions: [SessionSummary]) -> [String: SessionSearchMatch] {
         let terms = Self.terms(query)
         guard !terms.isEmpty else { return [:] }
-        let hits: [[String: Int]] = locked { terms.map(contentHits) } ?? terms.map { _ in [:] }
+        let emptyHits: [[String: Int]] = terms.map { _ in [:] }
+        let hits: [[String: Int]] = locked { terms.map { contentHits($0) } } ?? emptyHits
 
         var result: [String: SessionSearchMatch] = [:]
         for session in sessions {
@@ -184,8 +186,11 @@ public final class SessionSearchIndex: @unchecked Sendable {
                 }
             }
             guard matched else { continue }
-            let excerpt = excerptHit.flatMap { hit in locked { excerpt(session: session.id, position: hit.position, term: hit.term) } ?? nil }
-            result[session.id] = SessionSearchMatch(excerpt: excerpt)
+            var found: SessionExcerpt?
+            if let hit = excerptHit, let fetched = locked({ self.excerpt(session: session.id, position: hit.position, term: hit.term) }) {
+                found = fetched
+            }
+            result[session.id] = SessionSearchMatch(excerpt: found)
         }
         return result
     }
