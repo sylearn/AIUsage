@@ -7,6 +7,8 @@ import AppKit
 
 enum AppSection: String, Hashable {
     case dashboard
+    /// 会话中心：浏览 Claude Code / Codex / OpenCode 的本地会话并一键继续（docs/SESSION_CENTER_DESIGN.md）。
+    case sessions
     /// 订阅账号：监控登录类账号（Claude / Codex / Cursor 等）的订阅额度与用量。
     case providerAccounts
     /// CPA 网关：管理官方 CLIProxyAPI sidecar、版本更新与多订阅账号池。
@@ -148,6 +150,10 @@ enum DefaultsKey {
     static let remoteHost = "remoteHost"
     static let remotePort = "remotePort"
     static let selectedProviderIds = "selectedProviderIds"
+    /// 会话中心「继续对话」使用的终端（SessionTerminal.rawValue）。缺省=按已安装情况自动选择。
+    static let sessionResumeTerminal = "sessionResumeTerminal"
+    /// 菜单栏「最近会话」是否展开。缺省=true。
+    static let menuBarRecentSessionsExpanded = "menuBarRecentSessionsExpanded"
     /// 主机端：是否把本机额度快照只读共享给远程模式的其它 AIUsage。缺省=false。
     static let shareQuotaEnabled = "shareQuotaEnabled"
     static let shareQuotaPort = "shareQuotaPort"
@@ -313,6 +319,13 @@ final class AppSettings: ObservableObject {
     @Published var sidebarProxiesGroupExpanded: Bool =
         UserDefaults.standard.object(forKey: DefaultsKey.sidebarProxiesGroupExpanded) as? Bool ?? true
 
+    /// 会话中心「继续对话」使用的终端；空串表示按已安装情况自动选择。
+    @Published var sessionResumeTerminal: String =
+        UserDefaults.standard.string(forKey: DefaultsKey.sessionResumeTerminal) ?? ""
+
+    @Published var menuBarRecentSessionsExpanded: Bool =
+        UserDefaults.standard.object(forKey: DefaultsKey.menuBarRecentSessionsExpanded) as? Bool ?? true
+
     private var cancellables = Set<AnyCancellable>()
 
     func pruneMenuBarPinnedIds(validQuotaIds: Set<String>, validCostIds: Set<String>) {
@@ -401,6 +414,8 @@ final class AppSettings: ObservableObject {
         $proxyAutoRestoreOnLaunch.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.proxyAutoRestoreOnLaunch) }.store(in: &cancellables)
         $hiddenSidebarSections.dropFirst().sink { defaults.set(Array($0), forKey: DefaultsKey.hiddenSidebarSections) }.store(in: &cancellables)
         $sidebarProxiesGroupExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sidebarProxiesGroupExpanded) }.store(in: &cancellables)
+        $sessionResumeTerminal.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sessionResumeTerminal) }.store(in: &cancellables)
+        $menuBarRecentSessionsExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.menuBarRecentSessionsExpanded) }.store(in: &cancellables)
     }
 
     static func normalizedAutoRefreshInterval(_ value: Int) -> Int {

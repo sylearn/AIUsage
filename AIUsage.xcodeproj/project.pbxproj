@@ -71,6 +71,9 @@
 		5EFDAQ012F99005000A15674 /* DashboardQuotaAttentionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */; };
 		5EFASR012F99006000A15674 /* AppSurfaceTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */; };
 		A1F1A5B12F99007000A15674 /* AppFlashBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A5B02F99007000A15674 /* AppFlashBanner.swift */; };
+		5E55C000000000000000000A /* MenuBarRecentSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E55C0000000000000000009 /* MenuBarRecentSessions.swift */; };
+		5E55C0000000000000000008 /* SessionReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E55C0000000000000000007 /* SessionReaderView.swift */; };
+		5E55C0000000000000000006 /* SessionCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E55C0000000000000000005 /* SessionCenterView.swift */; };
 		A1F1A5C12F99008000A15674 /* GatewayRuntimeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A5C02F99008000A15674 /* GatewayRuntimeControl.swift */; };
 		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
 		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
@@ -134,6 +137,7 @@
 		B1REFB012F97002000A15674 /* ProviderRefreshResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */; };
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
 		C1CDP0012FD1000100B26789 /* ClaudeDesktopProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CDP0022FD1000100B26789 /* ClaudeDesktopProfileStore.swift */; };
+		5E55C0000000000000000002 /* TerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E55C0000000000000000001 /* TerminalLauncher.swift */; };
 		C1CDI0012FD1000200B26789 /* ClaudeDesktopIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CDI0022FD1000200B26789 /* ClaudeDesktopIntegrationManager.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
 		BC961583AC5E99AF1F7040E3 /* ProxyUsageArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5474125839BFE89230DB2B31 /* ProxyUsageArchive.swift */; };
@@ -144,6 +148,7 @@
 		C1AA000400000000000000B4 /* PublicModelPricingImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000400000000000000A4 /* PublicModelPricingImport.swift */; };
 		C1AV00012FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */; };
 		C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */; };
+		5E55C0000000000000000004 /* SessionCenterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E55C0000000000000000003 /* SessionCenterStore.swift */; };
 		C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */; };
 		C1CA00062FCA005000B26789 /* CallAnalyticsView+Rankings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */; };
 		C1CA00082FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */; };
@@ -307,6 +312,9 @@
 		5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardQuotaAttentionSection.swift; sourceTree = "<group>"; };
 		5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSurfaceTokens.swift; sourceTree = "<group>"; };
 		A1F1A5B02F99007000A15674 /* AppFlashBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFlashBanner.swift; sourceTree = "<group>"; };
+		5E55C0000000000000000009 /* MenuBarRecentSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRecentSessions.swift; sourceTree = "<group>"; };
+		5E55C0000000000000000007 /* SessionReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionReaderView.swift; sourceTree = "<group>"; };
+		5E55C0000000000000000005 /* SessionCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCenterView.swift; sourceTree = "<group>"; };
 		A1F1A5C02F99008000A15674 /* GatewayRuntimeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayRuntimeControl.swift; sourceTree = "<group>"; };
 		5EFSNV002F99003300A15674 /* SidebarNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNavigation.swift; sourceTree = "<group>"; };
 		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
@@ -366,6 +374,7 @@
 		B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshResult.swift; sourceTree = "<group>"; };
 		B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSCertificateManager.swift; sourceTree = "<group>"; };
 		C1CDP0022FD1000100B26789 /* ClaudeDesktopProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeDesktopProfileStore.swift; sourceTree = "<group>"; };
+		5E55C0000000000000000001 /* TerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLauncher.swift; sourceTree = "<group>"; };
 		C1CDI0022FD1000200B26789 /* ClaudeDesktopIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeDesktopIntegrationManager.swift; sourceTree = "<group>"; };
 		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
 		C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyConfigEditorView+JSONTab.swift"; sourceTree = "<group>"; };
@@ -374,6 +383,7 @@
 		C1AA000400000000000000A4 /* PublicModelPricingImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicModelPricingImport.swift; sourceTree = "<group>"; };
 		C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeAvailabilitySection.swift; sourceTree = "<group>"; };
 		C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsStore.swift; sourceTree = "<group>"; };
+		5E55C0000000000000000003 /* SessionCenterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCenterStore.swift; sourceTree = "<group>"; };
 		C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsView.swift; sourceTree = "<group>"; };
 		C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+Rankings.swift"; sourceTree = "<group>"; };
 		C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+ZeroCall.swift"; sourceTree = "<group>"; };
@@ -499,6 +509,7 @@
 				C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */,
 				C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */,
 				C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */,
+				5E55C0000000000000000003 /* SessionCenterStore.swift */,
 				5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */,
 				A2B3C4D32F96001000A15674 /* ProxyViewModel+LogManagement.swift */,
 				A2B3C4D52F96001000A15674 /* ProxyViewModel+ProxyServer.swift */,
@@ -612,6 +623,7 @@
 				C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */,
 				B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */,
 				C1CDP0022FD1000100B26789 /* ClaudeDesktopProfileStore.swift */,
+				5E55C0000000000000000001 /* TerminalLauncher.swift */,
 				C1SP00002FB0000500B26789 /* SystemProxyDetector.swift */,
 				C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */,
 				5EFPA0002F91000000A15674 /* ProviderAuth */,
@@ -676,6 +688,9 @@
 				5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */,
 				5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */,
 				A1F1A5B02F99007000A15674 /* AppFlashBanner.swift */,
+				5E55C0000000000000000009 /* MenuBarRecentSessions.swift */,
+				5E55C0000000000000000007 /* SessionReaderView.swift */,
+				5E55C0000000000000000005 /* SessionCenterView.swift */,
 				5EFSTC002F99003200A15674 /* DashboardStateCards.swift */,
 				5EFSAA002F99004000A15674 /* SubscriptionAccountActions.swift */,
 				5EFSAL002F99004100A15674 /* SubscriptionAccountListModels.swift */,
@@ -946,6 +961,9 @@
 				5EFDAQ012F99005000A15674 /* DashboardQuotaAttentionSection.swift in Sources */,
 				5EFASR012F99006000A15674 /* AppSurfaceTokens.swift in Sources */,
 				A1F1A5B12F99007000A15674 /* AppFlashBanner.swift in Sources */,
+				5E55C000000000000000000A /* MenuBarRecentSessions.swift in Sources */,
+				5E55C0000000000000000008 /* SessionReaderView.swift in Sources */,
+				5E55C0000000000000000006 /* SessionCenterView.swift in Sources */,
 				A1F1A5C12F99008000A15674 /* GatewayRuntimeControl.swift in Sources */,
 				5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */,
 				5EFSAA012F99004000A15674 /* SubscriptionAccountActions.swift in Sources */,
@@ -1007,6 +1025,7 @@
 				C1OE00262FB0005000B26789 /* OpenCodeDefaultModelNodeSection.swift in Sources */,
 				C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */,
 				C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */,
+				5E55C0000000000000000004 /* SessionCenterStore.swift in Sources */,
 				C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */,
 				C1CA00062FCA005000B26789 /* CallAnalyticsView+Rankings.swift in Sources */,
 				C1CA00082FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift in Sources */,
@@ -1052,6 +1071,7 @@
 				B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */,
 				B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */,
 				C1CDP0012FD1000100B26789 /* ClaudeDesktopProfileStore.swift in Sources */,
+				5E55C0000000000000000002 /* TerminalLauncher.swift in Sources */,
 				C1CDI0012FD1000200B26789 /* ClaudeDesktopIntegrationManager.swift in Sources */,
 				B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */,
 				B1GP00812F97002000A15674 /* GlobalProxySectionScaffold.swift in Sources */,
