@@ -28,6 +28,14 @@ public enum SessionResumeBlocker: String, Sendable, Hashable {
     case recordMissing
 }
 
+/// 原工具此刻在用这个会话（每次扫描现算，不进缓存）。
+public enum SessionActivity: String, Sendable, Hashable {
+    /// 正在回复或执行工具。
+    case working
+    /// CLI 开着这个会话，在等用户输入（只有 Claude Code 登记了进程，能判断这一种）。
+    case waiting
+}
+
 /// 列表里的一条会话。
 public struct SessionSummary: Identifiable, Hashable, Sendable {
     public var id: String { tool.rawValue + ":" + sessionID }
@@ -51,6 +59,8 @@ public struct SessionSummary: Identifiable, Hashable, Sendable {
     let searchText: String
     /// 正文所在位置，只供本模块加载正文。
     let locator: SessionLocator
+    /// nil 表示没有在进行。
+    public internal(set) var activity: SessionActivity? = nil
 
     public var projectName: String? {
         guard let directory, !directory.isEmpty else { return nil }

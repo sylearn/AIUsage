@@ -5,31 +5,67 @@ import Foundation
 // 正文：thread_history_<N>.sqlite 的 thread_items（结构化条目，不解析会话文件）。
 // Codex 会把旧会话文件压成 .jsonl.zst，而 threads.rollout_path 仍写 .jsonl，两种后缀都算「记录还在」。
 // 子代理线程（source 含 subagent，如 guardian 审查）与已归档线程不列出。
+// 「进行中」：线程最新一轮在 thread_turns 里是 inProgress，且最后一次动静在 30 分钟内（崩溃会留下永远 inProgress 的旧轮次）。
 
 final class CodexSessionSource {
     private let environment: SessionEnvironment
     private var cacheKey: [FileFingerprint?] = []
     private var cached: [SessionSummary] = []
+    /// 最新一轮还没结束的线程，及其最后一次动静的时间。
+    private var cachedInProgress: [String: Date] = [:]
 
     init(environment: SessionEnvironment) {
         self.environment = environment
     }
 
-    func scan() -> [SessionSummary] {
+    func scan(now: Date = Date()) -> [SessionSummary] {
         let root = environment.codexRoot
         guard let statePath = SessionSQLite.newestVersionedDatabase(in: root, prefix: "state_") else {
             cached = []
             cacheKey = []
+            cachedInProgress = [:]
             return []
         }
         let historyPath = SessionSQLite.newestVersionedDatabase(in: root, prefix: "thread_history_")
         let key = SessionSQLite.fingerprint(statePath) + SessionSQLite.fingerprint(historyPath)
-        if key == cacheKey { return cached }
+        if key != cacheKey {
+            cached = Self.readThreads(statePath: statePath, historyPath: historyPath)
+            cachedInProgress = historyPath.map(Self.inProgressThreads(historyPath:)) ?? [:]
+            cacheKey = key
+        }
+        guard !cachedInProgress.isEmpty else { return cached }
+        // 时间窗口每次扫描现算：数据库没变，残留的未完成轮次也会按时过期。
+        return cached.map { summary in
+            guard let last = cachedInProgress[summary.sessionID],
+                  now.timeIntervalSince(last) < SessionText.activityWindow else { return summary }
+            var summary = summary
+            summary.activity = .working
+            return summary
+        }
+    }
 
-        let summaries = Self.readThreads(statePath: statePath, historyPath: historyPath)
-        cacheKey = key
-        cached = summaries
-        return summaries
+    /// 最新一轮是 inProgress 的线程 → 最后一次动静（轮次开始或最近一条条目）。
+    static func inProgressThreads(historyPath: String) -> [String: Date] {
+        guard let history = SessionSQLite(path: historyPath), history.tableExists("thread_turns") else { return [:] }
+        let columns = history.columns(of: "thread_turns")
+        guard columns.isSuperset(of: ["thread_id", "status", "rollout_ordinal"]) else { return [:] }
+        let started = columns.contains("started_at") ? "t.started_at" : "NULL"
+        var result: [String: Date] = [:]
+        history.query("""
+            SELECT t.thread_id AS thread_id, \(started) AS started_at,
+                   (SELECT MAX(created_at_ms) FROM thread_items i WHERE i.thread_id = t.thread_id) AS last_item_ms
+            FROM thread_turns t
+            WHERE t.status = 'inProgress'
+              AND t.rollout_ordinal = (SELECT MAX(rollout_ordinal) FROM thread_turns WHERE thread_id = t.thread_id)
+            """) { row in
+            guard let thread = row.string("thread_id") else { return }
+            let dates = [
+                SessionText.date(epoch: row.int64("started_at").map { NSNumber(value: $0) }),
+                SessionText.date(epoch: row.int64("last_item_ms").map { NSNumber(value: $0) })
+            ].compactMap { $0 }
+            if let last = dates.max() { result[thread] = last }
+        }
+        return result
     }
 
     // MARK: Summary
@@ -124,7 +160,8 @@ final class CodexSessionSource {
 
     // MARK: Transcript
 
-    static func transcript(threadID: String, historyPath: String?, base: String?, home: String) throws -> SessionTranscript {
+    static func transcript(threadID: String, historyPath: String?, base: String?, home: String,
+                           limit: Int = TranscriptBuilder.renderLimit) throws -> SessionTranscript {
         guard let historyPath else { throw SessionTranscriptError.unavailable }
         guard let history = SessionSQLite(path: historyPath) else { throw SessionTranscriptError.unreadable }
         var builder = TranscriptBuilder()
@@ -141,7 +178,7 @@ final class CodexSessionSource {
         }
         guard ok else { throw SessionTranscriptError.unreadable }
         guard found else { throw SessionTranscriptError.unavailable }
-        return builder.build()
+        return builder.build(limit: limit)
     }
 
     static func append(_ item: [String: Any], type: String, date: Date?, base: String?, home: String, to builder: inout TranscriptBuilder) {

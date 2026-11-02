@@ -6,24 +6,31 @@ import Foundation
 //   • opencode.db v1：session / message / part 表（data 列与 JSON 文件同形）
 //   • opencode.db v2：session_v2 / session_message（工具调用内联在 data.content）/ session_part
 // 表结构按列探测；parent_id 非空的子会话与已归档会话不列出；JSON 与数据库重复的会话以数据库为准。
+// 「进行中」只看 v1 数据库：最后一条消息是还没完成（没有 time.completed）的助手消息，且在 30 分钟内。
+// 旧版 JSON 存储原地改写消息文件、目录修改时间不变，扫描缓存看不到消息完成，不做判断；v2 的完成标记还没有样本。
 
 final class OpenCodeSessionSource {
     private let environment: SessionEnvironment
     private var jsonCache: [String: (key: [FileFingerprint?], summary: SessionSummary?)] = [:]
     private var databaseKey: [FileFingerprint?] = []
     private var databaseCached: [SessionSummary] = []
+    /// 数据库里最后一条消息还没完成的会话，及那条消息的开始时间。
+    private var databaseOpenSince: [String: Date] = [:]
 
     init(environment: SessionEnvironment) {
         self.environment = environment
     }
 
-    func scan() -> [SessionSummary] {
+    func scan(now: Date = Date()) -> [SessionSummary] {
         let dataDirectory = environment.openCodeDataDirectory
         var byID: [String: SessionSummary] = [:]
         for summary in scanJSON(storageRoot: (dataDirectory as NSString).appendingPathComponent("storage")) {
             byID[summary.sessionID] = summary
         }
-        for summary in scanDatabase(path: (dataDirectory as NSString).appendingPathComponent("opencode.db")) {
+        for var summary in scanDatabase(path: (dataDirectory as NSString).appendingPathComponent("opencode.db")) {
+            if let since = databaseOpenSince[summary.sessionID], now.timeIntervalSince(since) < SessionText.activityWindow {
+                summary.activity = .working
+            }
             byID[summary.sessionID] = summary
         }
         return Array(byID.values)
@@ -117,12 +124,14 @@ final class OpenCodeSessionSource {
         guard key.first.flatMap({ $0 }) != nil else {
             databaseKey = []
             databaseCached = []
+            databaseOpenSince = [:]
             return []
         }
         if key == databaseKey { return databaseCached }
-        let summaries = Self.readDatabase(path: path)
+        let (summaries, openSince) = Self.readDatabase(path: path)
         databaseKey = key
         databaseCached = summaries
+        databaseOpenSince = openSince
         return summaries
     }
 
@@ -132,11 +141,11 @@ final class OpenCodeSessionSource {
         return nil
     }
 
-    private static func readDatabase(path: String) -> [SessionSummary] {
-        guard let db = SessionSQLite(path: path), let layout = layout(of: db) else { return [] }
+    private static func readDatabase(path: String) -> (summaries: [SessionSummary], openSince: [String: Date]) {
+        guard let db = SessionSQLite(path: path), let layout = layout(of: db) else { return ([], [:]) }
         let table = layout == .v2 ? "session_v2" : "session"
         let columns = db.columns(of: table)
-        guard columns.contains("id") else { return [] }
+        guard columns.contains("id") else { return ([], [:]) }
         let wanted = [
             "id", "title", "directory", "parent_id", "time_created", "time_updated", "time_archived",
             "tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write"
@@ -144,6 +153,7 @@ final class OpenCodeSessionSource {
         let aggregates = layout == .v2 ? v2Aggregates(db) : v1Aggregates(db)
 
         var summaries: [SessionSummary] = []
+        var openSince: [String: Date] = [:]
         db.query("SELECT \(wanted.joined(separator: ", ")) FROM \(table)") { row in
             guard let id = row.string("id"), !id.isEmpty,
                   row.string("parent_id")?.isEmpty ?? true,
@@ -161,9 +171,12 @@ final class OpenCodeSessionSource {
                 tokens: columnTokens > 0 ? Int(columnTokens) : aggregate.tokens,
                 locator: .openCodeDatabase(path: path, layout: layout)
             )
-            if let summary { summaries.append(summary) }
+            if let summary {
+                summaries.append(summary)
+                if layout == .v1, let latest = aggregate.latest, latest.open { openSince[id] = latest.date }
+            }
         }
-        return summaries
+        return (summaries, openSince)
     }
 
     private static func v1Aggregates(_ db: SessionSQLite) -> [String: Aggregate] {
@@ -218,12 +231,19 @@ final class OpenCodeSessionSource {
         var model: String?
         var tokenSum = 0
         var lastDate: Date?
+        /// 时间最晚的一条消息：开始时间，以及它是不是还没完成的助手消息。
+        var latest: (date: Date, open: Bool)?
 
         var tokens: Int? { tokenSum > 0 ? tokenSum : nil }
 
         mutating func add(role: String, info: [String: Any], parts: [[String: Any]]) {
-            if let date = SessionText.date(epoch: (info["time"] as? [String: Any])?["created"]) {
+            let time = info["time"] as? [String: Any]
+            if let date = SessionText.date(epoch: time?["created"]) {
                 lastDate = max(lastDate ?? date, date)
+                if latest.map({ date >= $0.date }) ?? true {
+                    let open = role == "assistant" && time?["completed"] == nil && info["error"] == nil
+                    latest = (date, open)
+                }
             }
             if role == "user" {
                 prompts += 1
@@ -275,7 +295,7 @@ final class OpenCodeSessionSource {
 
     // MARK: Transcript
 
-    static func transcript(summary: SessionSummary, home: String) throws -> SessionTranscript {
+    static func transcript(summary: SessionSummary, home: String, limit: Int = TranscriptBuilder.renderLimit) throws -> SessionTranscript {
         var builder = TranscriptBuilder()
         let base = summary.directory
         switch summary.locator {
@@ -295,7 +315,7 @@ final class OpenCodeSessionSource {
         default:
             throw SessionTranscriptError.unavailable
         }
-        return builder.build()
+        return builder.build(limit: limit)
     }
 
     private static func appendV1(db: SessionSQLite, sessionID: String, base: String?, home: String, to builder: inout TranscriptBuilder) -> Bool {

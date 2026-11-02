@@ -1,14 +1,32 @@
 import Foundation
 import SQLite3
 
-// MARK: - Session Center · Read-only SQLite
+// MARK: - Session Center · SQLite
 // 以只读模式打开原工具的数据库：不复制、不加写锁，WAL 模式下也能与原工具并发读。
 // 原工具退出后会删掉 -wal / -shm，而只读连接无权重建 -shm，WAL 库会打不开（实测 Codex 退出后即如此）；
 // 此时退回 immutable=1：没有 -wal 就没有未落盘的内容，不会少读数据。
 // 列名按 PRAGMA table_info 探测，表结构升级时缺列只影响对应字段。
+// 可写连接（`writable(path:)`）只用于 AIUsage 自己的全文索引，从不用来打开原工具的文件。
 
 final class SessionSQLite {
     private var db: OpaquePointer?
+
+    private init(handle: OpaquePointer?) {
+        db = handle
+    }
+
+    /// 打开（不存在则创建）AIUsage 自己的数据库，只给全文索引用。
+    static func writable(path: String) -> SessionSQLite? {
+        var handle: OpaquePointer?
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+        guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK,
+              sqlite3_exec(handle, "SELECT count(*) FROM sqlite_master", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            return nil
+        }
+        sqlite3_busy_timeout(handle, 2_000)
+        return SessionSQLite(handle: handle)
+    }
 
     init?(path: String) {
         guard FileManager.default.fileExists(atPath: path),
@@ -46,6 +64,20 @@ final class SessionSQLite {
             if let name = row.string("name") { names.insert(name) }
         }
         return names
+    }
+
+    /// 执行不返回行的语句；SQL 出错返回 false。
+    @discardableResult
+    func execute(_ sql: String, _ values: [BindValue] = []) -> Bool {
+        if values.isEmpty {
+            return sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
+        }
+        return query(sql, values) { _ in }
+    }
+
+    /// 最近一次插入的 rowid。
+    var lastInsertRowID: Int64 {
+        sqlite3_last_insert_rowid(db)
     }
 
     /// 逐行回调；SQL 出错返回 false。
