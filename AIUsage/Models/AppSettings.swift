@@ -154,6 +154,8 @@ enum DefaultsKey {
     static let sessionResumeTerminal = "sessionResumeTerminal"
     /// 菜单栏「最近会话」是否展开。缺省=true。
     static let menuBarRecentSessionsExpanded = "menuBarRecentSessionsExpanded"
+    /// 会话中心全文搜索：在本机缓存目录建正文索引，搜索也覆盖回复与工具调用。缺省=false（用户确认后开启）。
+    static let sessionFullTextSearch = "sessionFullTextSearch"
     /// 主机端：是否把本机额度快照只读共享给远程模式的其它 AIUsage。缺省=false。
     static let shareQuotaEnabled = "shareQuotaEnabled"
     static let shareQuotaPort = "shareQuotaPort"
@@ -326,6 +328,10 @@ final class AppSettings: ObservableObject {
     @Published var menuBarRecentSessionsExpanded: Bool =
         UserDefaults.standard.object(forKey: DefaultsKey.menuBarRecentSessionsExpanded) as? Bool ?? true
 
+    /// 会话中心全文搜索；关闭时删除索引（见 SessionCenterStore）。
+    @Published var sessionFullTextSearch: Bool =
+        UserDefaults.standard.bool(forKey: DefaultsKey.sessionFullTextSearch)
+
     private var cancellables = Set<AnyCancellable>()
 
     func pruneMenuBarPinnedIds(validQuotaIds: Set<String>, validCostIds: Set<String>) {
@@ -416,6 +422,7 @@ final class AppSettings: ObservableObject {
         $sidebarProxiesGroupExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sidebarProxiesGroupExpanded) }.store(in: &cancellables)
         $sessionResumeTerminal.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sessionResumeTerminal) }.store(in: &cancellables)
         $menuBarRecentSessionsExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.menuBarRecentSessionsExpanded) }.store(in: &cancellables)
+        $sessionFullTextSearch.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sessionFullTextSearch) }.store(in: &cancellables)
     }
 
     static func normalizedAutoRefreshInterval(_ value: Int) -> Int {

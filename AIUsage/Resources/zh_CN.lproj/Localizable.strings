@@ -1356,6 +1356,10 @@
 "sessions.action.more" = "更多";
 "sessions.action.resume_help" = "继续这个会话（⌘↩）";
 "sessions.action.reveal" = "在 Finder 中显示项目";
+"sessions.activity.claude_help" = "Claude Code 正在处理这个会话。";
+"sessions.activity.waiting" = "等待输入";
+"sessions.activity.waiting_help" = "Claude Code 开着这个会话，在等你输入。";
+"sessions.activity.working" = "进行中";
 "sessions.badge.pinned" = "已置顶";
 "sessions.blocker.directory" = "项目目录已不存在";
 "sessions.blocker.record" = "会话记录已不在磁盘上";
@@ -1377,6 +1381,10 @@
 "sessions.flash.id_copied" = "已复制会话 ID";
 "sessions.footer.keys" = "↑↓ 选择 · ↩ 继续对话 · 右键查看更多";
 "sessions.footer.privacy" = "只读本机记录，不上传，不修改原文件";
+"sessions.full_text.confirm_message" = "AIUsage 会在本机缓存目录（~/Library/Caches/AIUsage）为会话正文建一份索引。索引只留在这台 Mac 上，不上传；关闭全文搜索时一并删除。";
+"sessions.full_text.confirm_title" = "也搜索回复和工具调用？";
+"sessions.full_text.toggle" = "搜索回复和工具调用";
+"sessions.full_text.turn_on" = "开启";
 "sessions.group.earlier" = "更早";
 "sessions.group.no_project" = "未知项目";
 "sessions.group.pinned" = "置顶";
@@ -1399,8 +1407,14 @@
 "sessions.placeholder.retention" = "Claude Code 默认只保留 30 天会话（settings.json 的 cleanupPeriodDays 可调）。";
 "sessions.placeholder.select" = "选择一个会话";
 "sessions.refresh" = "重新扫描本机会话";
+"sessions.resume_active.cancel" = "取消";
+"sessions.resume_active.confirm" = "仍然继续";
+"sessions.resume_active.title" = "这个会话还开着";
 "sessions.search.clear" = "清除搜索";
+"sessions.search.include_replies" = "也搜回复";
+"sessions.search.index_preparing" = "正在准备全文索引…";
 "sessions.search.placeholder" = "搜索标题、目录、分支或提问";
+"sessions.search.scope_basic" = "只搜了标题、目录和提问。";
 "sessions.stats.failures" = "次失败";
 "sessions.stats.files" = "个文件改动";
 "sessions.stats.prompts" = "轮提问";

@@ -5,12 +5,12 @@ import SwiftUI
 // MARK: - Session Center
 // 主窗口「会话」页：左侧会话列表（搜索 / 工具筛选 / 分组），右侧阅读视图与大纲。
 // 状态见 SessionCenterStore；设计文档 docs/SESSION_CENTER_DESIGN.md §5。
+// 页面可见期间实时更新（文件监听），另有 30 秒定时扫描兜底：进程退出、「进行中」过期不一定伴随文件变化。
 
 struct SessionCenterView: View {
     @ObservedObject private var store = SessionCenterStore.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    /// 页面可见时每 30 秒增量刷新一次（未变化的文件不会重新解析）。
     private let autoRefresh = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -31,6 +31,8 @@ struct SessionCenterView: View {
         }
         .appPageBackground(colorScheme)
         .appFlashOverlay(store.flash)
+        .onAppear { store.beginObserving() }
+        .onDisappear { store.endObserving() }
         .task { await store.refresh() }
         .onReceive(autoRefresh) { _ in Task { await store.refresh() } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -46,6 +48,7 @@ private struct SessionListColumn: View {
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
+    @State private var confirmingFullText = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,6 +63,28 @@ private struct SessionListColumn: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
         }
+        .alert(L("Search replies and tool calls too?", "也搜索回复和工具调用？", key: "sessions.full_text.confirm_title"),
+               isPresented: $confirmingFullText) {
+            Button(L("Turn On", "开启", key: "sessions.full_text.turn_on")) { store.setFullTextSearch(true) }
+            Button(L("Cancel", "取消", key: "sessions.resume_active.cancel"), role: .cancel) {}
+        } message: {
+            Text(L("AIUsage builds an index of session text in ~/Library/Caches/AIUsage. It stays on this Mac, is never uploaded, and is deleted when you turn this off.",
+                   "AIUsage 会在本机缓存目录（~/Library/Caches/AIUsage）为会话正文建一份索引。索引只留在这台 Mac 上，不上传；关闭全文搜索时一并删除。",
+                   key: "sessions.full_text.confirm_message"))
+        }
+    }
+
+    private var fullTextBinding: Binding<Bool> {
+        Binding(
+            get: { store.isFullTextEnabled },
+            set: { enabled in
+                if enabled {
+                    confirmingFullText = true
+                } else {
+                    store.setFullTextSearch(false)
+                }
+            }
+        )
     }
 
     private var header: some View {
@@ -68,23 +93,34 @@ private struct SessionListColumn: View {
                 Text(L("Sessions", "会话", key: "nav.sessions"))
                     .font(.system(size: 20, weight: .bold))
                 Spacer()
-                if store.isScanning {
+                if store.isRescanning {
                     ProgressView().controlSize(.small)
                 }
-                Button {
-                    Task { await store.refresh(force: true) }
+                Menu {
+                    Button(L("Rescan Local Sessions", "重新扫描本机会话", key: "sessions.refresh")) {
+                        Task { await store.rescan() }
+                    }
+                    Divider()
+                    Toggle(L("Search Replies and Tool Calls", "搜索回复和工具调用", key: "sessions.full_text.toggle"),
+                           isOn: fullTextBinding)
+                    if let size = store.indexFileSize {
+                        Text(L("Index uses \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))",
+                               "索引占用 \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))"))
+                    }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 13, weight: .medium))
                 }
-                .buttonStyle(.plain)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
                 .foregroundStyle(AppContent.secondary(colorScheme))
-                .help(L("Rescan local sessions", "重新扫描本机会话", key: "sessions.refresh"))
-                .disabled(store.isScanning)
+                .help(L("More", "更多", key: "sessions.action.more"))
             }
             searchField
+            if store.isSearching {
+                searchScope
+            }
             toolFilter
             HStack(spacing: 14) {
                 ForEach(SessionCenterStore.Grouping.allCases, id: \.self) { grouping in
@@ -146,6 +182,39 @@ private struct SessionListColumn: View {
         .background(AppSurface.elevated(colorScheme), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
             .stroke(searchFocused ? AppAccent.control(colorScheme).opacity(0.6) : AppStroke.subtle(colorScheme)))
+    }
+
+    /// 搜索时说明搜了哪些内容：没开全文搜索时给开启入口，首次建索引时显示进度。
+    @ViewBuilder
+    private var searchScope: some View {
+        switch store.indexState {
+        case .off:
+            HStack(spacing: 4) {
+                Text(L("Titles, folders and prompts only.", "只搜了标题、目录和提问。", key: "sessions.search.scope_basic"))
+                    .foregroundStyle(AppContent.tertiary(colorScheme))
+                Button(L("Include replies", "也搜回复", key: "sessions.search.include_replies")) {
+                    confirmingFullText = true
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppAccent.control(colorScheme))
+            }
+            .font(.system(size: 11.5))
+            .lineLimit(1)
+        case .building(let done, let total):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text(total > 0
+                     ? L("Indexing \(done)/\(total) sessions; results may be incomplete",
+                         "正在建立全文索引 \(done)/\(total)，结果可能不全")
+                     : L("Preparing the full-text index…", "正在准备全文索引…", key: "sessions.search.index_preparing"))
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(AppContent.tertiary(colorScheme))
+            .lineLimit(1)
+        case .ready:
+            EmptyView()
+        }
     }
 
     private var toolFilter: some View {
@@ -225,7 +294,8 @@ private struct SessionListColumn: View {
                         ForEach(store.groups) { group in
                             Section {
                                 ForEach(group.sessions) { session in
-                                    SessionRow(store: store, session: session, isSelected: store.selectedID == session.id)
+                                    SessionRow(store: store, session: session, isSelected: store.selectedID == session.id,
+                                               excerpt: store.excerpt(for: session), terms: store.highlightTerms)
                                         .id(session.id)
                                         .onTapGesture {
                                             listFocused = true
@@ -295,6 +365,8 @@ private struct SessionRow: View {
     @ObservedObject var store: SessionCenterStore
     let session: SessionSummary
     let isSelected: Bool
+    let excerpt: SessionExcerpt?
+    let terms: [String]
     @Environment(\.colorScheme) private var colorScheme
     @State private var hovering = false
 
@@ -324,6 +396,10 @@ private struct SessionRow: View {
                 .foregroundStyle(AppContent.tertiary(colorScheme))
                 .lineLimit(1)
                 HStack(spacing: 4) {
+                    if let activity = session.activity {
+                        SessionActivityLabel(activity: activity, tool: session.tool)
+                        Text("·")
+                    }
                     Text(SessionDateText.short(session.updatedAt))
                     if let prompts = session.promptCount {
                         Text("·")
@@ -337,6 +413,18 @@ private struct SessionRow: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(AppContent.tertiary(colorScheme))
                 .monospacedDigit()
+                if let excerpt {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Image(systemName: SessionHighlight.symbol(for: excerpt.kind))
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(AppContent.tertiary(colorScheme))
+                        Text(SessionHighlight.attributed(excerpt.text, terms: terms, scheme: colorScheme))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AppContent.secondary(colorScheme))
+                            .lineLimit(2)
+                    }
+                    .padding(.top, 2)
+                }
             }
             Spacer(minLength: 0)
             if (hovering || isSelected), session.resumeBlocker == nil {

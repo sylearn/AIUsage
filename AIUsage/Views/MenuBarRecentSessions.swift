@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Menu Bar · Recent Sessions
 // 菜单栏额度区下方的「最近会话」：最多 4 条，可折叠（状态记住）。
-// 点行打开主窗口会话中心并选中；点右侧按钮直接在终端继续。
+// 点行打开主窗口会话中心并选中；点右侧按钮直接在终端继续。面板打开期间实时更新，会话进行中时显示标记。
 // 菜单栏宿主是 transient NSPopover，这里不弹任何嵌套 popover 或原生 Menu。
 
 struct MenuBarRecentSessionsSection: View {
@@ -22,6 +22,8 @@ struct MenuBarRecentSessionsSection: View {
                     .padding(.bottom, 8)
             }
         }
+        .onAppear { store.beginObserving() }
+        .onDisappear { store.endObserving() }
         .task { await store.refresh() }
     }
 
@@ -108,11 +110,17 @@ private struct MenuBarSessionRow: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text([session.projectName, SessionDateText.short(session.updatedAt)]
-                            .compactMap { $0 }.joined(separator: " · "))
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if let activity = session.activity {
+                                SessionActivityLabel(activity: activity, tool: session.tool)
+                                Text("·")
+                            }
+                            Text([session.projectName, SessionDateText.short(session.updatedAt)]
+                                .compactMap { $0 }.joined(separator: " · "))
+                        }
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     }
                     Spacer(minLength: 0)
                 }

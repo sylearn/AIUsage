@@ -4,6 +4,7 @@ import SwiftUI
 // MARK: - Session Reader
 // 会话中心右侧：头部（工具、标题、元信息、动作）、正文（提问 / 回复 / 步骤组 / 提示）与大纲。
 // 步骤组默认折叠，含失败步骤的组默认展开并用橙色标出。
+// 搜索时高亮搜索词；从全文搜索结果点进来会滚到命中的那一条。会话进行中、视图停在底部时跟着新内容滚动。
 
 struct SessionReaderView: View {
     @ObservedObject var store: SessionCenterStore
@@ -34,6 +35,14 @@ struct SessionReaderView: View {
                     .textSelection(.enabled)
                 if session.isPinned {
                     badge(L("Pinned", "已置顶", key: "sessions.badge.pinned"), tint: AppContent.secondary(colorScheme))
+                }
+                if let activity = session.activity {
+                    SessionActivityLabel(activity: activity, tool: session.tool)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(AppContent.secondary(colorScheme))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(SessionActivityDot.tint(activity, colorScheme).opacity(0.13), in: Capsule())
                 }
                 if let blocker = session.resumeBlocker {
                     badge(Self.blockerText(blocker), tint: .orange)
@@ -187,7 +196,12 @@ struct SessionReaderView: View {
                           "文件可能正被占用，或格式较新。可以重新扫描后再试。", key: "sessions.failed.detail")
             )
         case .loaded(let transcript):
-            SessionTranscriptView(session: session, transcript: transcript)
+            SessionTranscriptView(
+                session: session,
+                transcript: transcript,
+                terms: store.highlightTerms,
+                focus: store.focus?.sessionID == session.id ? store.focus : nil
+            )
         }
     }
 
@@ -230,7 +244,13 @@ struct SessionReaderView: View {
 private struct SessionTranscriptView: View {
     let session: SessionSummary
     let transcript: SessionTranscript
+    let terms: [String]
+    let focus: SessionCenterStore.TranscriptFocus?
     @Environment(\.colorScheme) private var colorScheme
+    /// 正文末尾是否在可见范围内（会话进行中时据此决定要不要跟着新内容滚动）。
+    @State private var atBottom = false
+    /// 条目序号从 0 开始，用 -1 标记末尾。
+    private static let bottomID = -1
 
     private var outline: [(index: Int, item: TranscriptItem, text: String)] {
         var number = 0
@@ -254,9 +274,14 @@ private struct SessionTranscriptView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             ForEach(transcript.items) { item in
-                                TranscriptItemView(tool: session.tool, item: item)
+                                TranscriptItemView(tool: session.tool, item: item, terms: terms)
                                     .id(item.id)
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id(Self.bottomID)
+                                .onAppear { atBottom = true }
+                                .onDisappear { atBottom = false }
                         }
                         .padding(.horizontal, 28)
                         .padding(.vertical, 22)
@@ -270,7 +295,37 @@ private struct SessionTranscriptView: View {
                     }
                 }
             }
+            .task(id: focus) {
+                guard let focus, let item = transcript.items.first(where: { $0.id == focus.itemID }) else { return }
+                // 长回复里命中词可能在末尾：把这一条按命中词在文中的相对位置对齐到视口的同一位置，命中处就在屏幕上。
+                let anchor = UnitPoint(x: 0.5, y: Self.hitFraction(in: item, terms: terms))
+                // 等 LazyVStack 完成首轮布局再滚；按估算高度滚一次后再校正一次。
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                proxy.scrollTo(focus.itemID, anchor: anchor)
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(focus.itemID, anchor: anchor) }
+            }
+            .onChange(of: transcript.items.last) { _, _ in
+                guard atBottom else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
         }
+    }
+
+    /// 第一个搜索词在这一条文字里的相对位置（0 为开头）。
+    static func hitFraction(in item: TranscriptItem, terms: [String]) -> CGFloat {
+        let text: String
+        switch item.entry {
+        case .prompt(let value), .reply(let value):
+            text = value
+        case .steps(let steps):
+            text = steps.map { [$0.name, $0.detail, $0.failureNote ?? ""].joined(separator: " ") }.joined(separator: "\n")
+        case .notice:
+            return 0
+        }
+        let hits = terms.compactMap { text.range(of: $0, options: .caseInsensitive)?.lowerBound }
+        guard let first = hits.min(), !text.isEmpty else { return 0 }
+        return CGFloat(text.distance(from: text.startIndex, to: first)) / CGFloat(text.count)
     }
 
     private func outlineColumn(proxy: ScrollViewProxy) -> some View {
@@ -343,6 +398,7 @@ private struct SessionTranscriptView: View {
 private struct TranscriptItemView: View {
     let tool: SessionTool
     let item: TranscriptItem
+    let terms: [String]
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -354,7 +410,7 @@ private struct TranscriptItemView: View {
                     Text(L("You", "你", key: "sessions.you") + (item.date.map { " · " + Self.time($0) } ?? ""))
                         .font(.system(size: 11))
                         .foregroundStyle(AppContent.tertiary(colorScheme))
-                    Text(text)
+                    Text(SessionHighlight.attributed(text, terms: terms, scheme: colorScheme))
                         .font(.system(size: 13.5))
                         .foregroundStyle(AppContent.primary(colorScheme))
                         .textSelection(.enabled)
@@ -369,11 +425,11 @@ private struct TranscriptItemView: View {
             HStack(alignment: .top, spacing: 10) {
                 ProviderIconView(tool.rawValue, size: 20)
                     .padding(.top, 1)
-                MessageText(text: text)
+                MessageText(text: text, terms: terms)
             }
             .padding(.trailing, 40)
         case .steps(let steps):
-            StepGroupView(steps: steps)
+            StepGroupView(steps: steps, terms: terms)
                 .padding(.leading, 30)
         case .notice(let notice):
             HStack(spacing: 6) {
@@ -410,12 +466,20 @@ private struct TranscriptItemView: View {
 
 private struct StepGroupView: View {
     let steps: [ToolStep]
+    let terms: [String]
     @State private var expanded: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    init(steps: [ToolStep]) {
+    /// 有失败步骤，或搜索词命中某一步时默认展开。
+    init(steps: [ToolStep], terms: [String]) {
         self.steps = steps
-        _expanded = State(initialValue: steps.contains(where: \.failed))
+        self.terms = terms
+        let hit = !terms.isEmpty && steps.contains { step in
+            terms.contains { term in
+                [step.name, step.detail, step.failureNote ?? ""].contains { $0.range(of: term, options: .caseInsensitive) != nil }
+            }
+        }
+        _expanded = State(initialValue: hit || steps.contains(where: \.failed))
     }
 
     private var failures: Int { steps.filter(\.failed).count }
@@ -469,7 +533,7 @@ private struct StepGroupView: View {
                 Divider().opacity(0.6)
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
-                        StepRow(step: step)
+                        StepRow(step: step, terms: terms)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -484,6 +548,7 @@ private struct StepGroupView: View {
 
 private struct StepRow: View {
     let step: ToolStep
+    let terms: [String]
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -499,14 +564,14 @@ private struct StepRow: View {
                 .frame(width: 84, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 if !step.detail.isEmpty {
-                    Text(step.detail)
+                    Text(SessionHighlight.attributed(step.detail, terms: terms, scheme: colorScheme))
                         .font(.system(size: 11.5, design: .monospaced))
                         .foregroundStyle(AppContent.secondary(colorScheme))
                         .lineLimit(2)
                         .textSelection(.enabled)
                 }
                 if let note = step.failureNote, !note.isEmpty {
-                    Text(note)
+                    Text(SessionHighlight.attributed(note, terms: terms, scheme: colorScheme))
                         .font(.system(size: 11.5))
                         .foregroundStyle(.orange)
                         .lineLimit(3)
@@ -522,6 +587,7 @@ private struct StepRow: View {
 /// 回复正文：``` 代码块用等宽底色块显示，其余按行内 Markdown 渲染（粗体、行内代码、链接）。
 private struct MessageText: View {
     let text: String
+    let terms: [String]
     @Environment(\.colorScheme) private var colorScheme
 
     private enum Segment: Hashable {
@@ -561,7 +627,7 @@ private struct MessageText: View {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case .prose(let prose):
-                    Text(Self.attributed(prose))
+                    Text(highlighted(Self.attributed(prose)))
                         .font(.system(size: 13.5))
                         .foregroundStyle(AppContent.primary(colorScheme))
                         .lineSpacing(2)
@@ -569,7 +635,7 @@ private struct MessageText: View {
                         .fixedSize(horizontal: false, vertical: true)
                 case .code(let code):
                     ScrollView(.horizontal, showsIndicators: false) {
-                        Text(code)
+                        Text(SessionHighlight.attributed(code, terms: terms, scheme: colorScheme))
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(AppContent.primary(colorScheme))
                             .textSelection(.enabled)
@@ -580,6 +646,12 @@ private struct MessageText: View {
                 }
             }
         }
+    }
+
+    private func highlighted(_ string: AttributedString) -> AttributedString {
+        var string = string
+        SessionHighlight.apply(to: &string, terms: terms, scheme: colorScheme)
+        return string
     }
 
     /// 行内 Markdown 之外，把列表符号换成「•」，标题行加粗。
@@ -601,5 +673,100 @@ private struct MessageText: View {
         let source = lines.joined(separator: "\n")
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(text)
+    }
+}
+
+// MARK: - Search highlight
+
+/// 搜索词高亮：列表摘录与阅读视图共用。不区分大小写，与搜索的匹配规则一致。
+enum SessionHighlight {
+    static func color(_ scheme: ColorScheme) -> Color {
+        Color.yellow.opacity(scheme == .dark ? 0.32 : 0.42)
+    }
+
+    static func attributed(_ text: String, terms: [String], scheme: ColorScheme) -> AttributedString {
+        var string = AttributedString(text)
+        apply(to: &string, terms: terms, scheme: scheme)
+        return string
+    }
+
+    static func apply(to string: inout AttributedString, terms: [String], scheme: ColorScheme) {
+        let color = color(scheme)
+        for term in terms where !term.isEmpty {
+            var lower = string.startIndex
+            while lower < string.endIndex, let range = string[lower...].range(of: term, options: .caseInsensitive) {
+                string[range].backgroundColor = color
+                lower = range.upperBound
+            }
+        }
+    }
+
+    static func symbol(for kind: SessionExcerpt.Kind) -> String {
+        switch kind {
+        case .prompt: return "person"
+        case .reply: return "text.bubble"
+        case .steps: return "wrench.and.screwdriver"
+        }
+    }
+}
+
+// MARK: - Activity
+
+/// 「进行中」：圆点（运行时呼吸）加文字，悬停说明判断依据。列表行、阅读视图头部、菜单栏共用。
+struct SessionActivityLabel: View {
+    let activity: SessionActivity
+    let tool: SessionTool
+
+    var body: some View {
+        // 文字颜色随所在位置（列表行、菜单栏、头部徽标）。
+        HStack(spacing: 4) {
+            SessionActivityDot(activity: activity)
+            Text(Self.title(activity))
+        }
+        .help(Self.detail(activity, tool: tool))
+        .accessibilityElement(children: .combine)
+    }
+
+    static func title(_ activity: SessionActivity) -> String {
+        switch activity {
+        case .working: return L("In progress", "进行中", key: "sessions.activity.working")
+        case .waiting: return L("Waiting for input", "等待输入", key: "sessions.activity.waiting")
+        }
+    }
+
+    static func detail(_ activity: SessionActivity, tool: SessionTool) -> String {
+        switch (activity, tool) {
+        case (.waiting, _):
+            return L("Open in Claude Code and waiting for your input.", "Claude Code 开着这个会话，在等你输入。",
+                     key: "sessions.activity.waiting_help")
+        case (.working, .claude):
+            return L("Claude Code is working on this session right now.", "Claude Code 正在处理这个会话。",
+                     key: "sessions.activity.claude_help")
+        case (.working, _):
+            return L("\(tool.displayName) started a turn here in the last 30 minutes that hasn't finished.",
+                     "\(tool.displayName) 在这个会话里有一轮还没结束（30 分钟内有动静）。")
+        }
+    }
+}
+
+struct SessionActivityDot: View {
+    let activity: SessionActivity
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dimmed = false
+
+    var body: some View {
+        Circle()
+            .fill(Self.tint(activity, colorScheme))
+            .frame(width: 6, height: 6)
+            .opacity(dimmed ? 0.3 : 1)
+            .onAppear {
+                guard activity == .working, !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dimmed = true }
+            }
+    }
+
+    static func tint(_ activity: SessionActivity, _ scheme: ColorScheme) -> Color {
+        activity == .working ? Color.green : AppContent.tertiary(scheme)
     }
 }
