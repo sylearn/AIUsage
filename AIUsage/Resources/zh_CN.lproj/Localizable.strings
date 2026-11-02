@@ -1355,6 +1355,7 @@
 "sessions.action.export" = "导出为 Markdown…";
 "sessions.action.more" = "更多";
 "sessions.action.resume_help" = "继续这个会话（⌘↩）";
+"sessions.action.resume_short" = "继续";
 "sessions.action.reveal" = "在 Finder 中显示项目";
 "sessions.activity.claude_help" = "Claude Code 正在处理这个会话。";
 "sessions.activity.waiting" = "等待输入";
@@ -1363,9 +1364,11 @@
 "sessions.badge.pinned" = "已置顶";
 "sessions.blocker.directory" = "项目目录已不存在";
 "sessions.blocker.record" = "会话记录已不在磁盘上";
+"sessions.empty.clear_search" = "清除搜索";
 "sessions.empty.filtered" = "没有匹配的会话";
 "sessions.empty.filtered_hint" = "换个关键词，或者切回「全部」。";
 "sessions.empty.hint" = "本机 Claude Code、Codex、OpenCode 的会话会出现在这里。";
+"sessions.empty.show_all" = "显示全部工具";
 "sessions.empty.title" = "还没有会话记录";
 "sessions.error.directory_missing" = "项目目录已不存在，无法继续这个会话。";
 "sessions.error.export_empty" = "这个会话没有可导出的内容。";
@@ -1379,8 +1382,10 @@
 "sessions.flash.command_copied" = "已复制恢复命令";
 "sessions.flash.exported" = "已导出";
 "sessions.flash.id_copied" = "已复制会话 ID";
-"sessions.footer.keys" = "↑↓ 选择 · ↩ 继续对话 · 右键查看更多";
 "sessions.footer.privacy" = "只读本机记录，不上传，不修改原文件";
+"sessions.footer.privacy_short" = "只读 · 不上传";
+"sessions.footer.resume" = "继续";
+"sessions.footer.select" = "选择";
 "sessions.full_text.confirm_message" = "AIUsage 会在本机缓存目录（~/Library/Caches/AIUsage）为会话正文建一份索引。索引只留在这台 Mac 上，不上传；关闭全文搜索时一并删除。";
 "sessions.full_text.confirm_title" = "也搜索回复和工具调用？";
 "sessions.full_text.toggle" = "搜索回复和工具调用";
@@ -1405,6 +1410,7 @@
 "sessions.outline" = "大纲";
 "sessions.placeholder.empty" = "没有找到本机会话";
 "sessions.placeholder.retention" = "Claude Code 默认只保留 30 天会话（settings.json 的 cleanupPeriodDays 可调）。";
+"sessions.placeholder.search" = "搜索";
 "sessions.placeholder.select" = "选择一个会话";
 "sessions.refresh" = "重新扫描本机会话";
 "sessions.resume_active.cancel" = "取消";

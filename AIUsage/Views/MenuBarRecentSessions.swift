@@ -113,6 +113,8 @@ private struct MenuBarSessionRow: View {
                         HStack(spacing: 4) {
                             if let activity = session.activity {
                                 SessionActivityLabel(activity: activity, tool: session.tool)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(SessionActivityDot.tint(activity, colorScheme))
                                 Text("·")
                             }
                             Text([session.projectName, SessionDateText.short(session.updatedAt)]
@@ -129,11 +131,13 @@ private struct MenuBarSessionRow: View {
             .buttonStyle(.plain)
             .help(L("Open in Sessions", "在会话中心查看", key: "menubar.recent_sessions.open"))
 
+            // 平时只露图标，悬停到这一行才出底色，四行并排时不显得重。
             Button(action: resume) {
                 Image(systemName: "terminal")
                     .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(hovering ? .primary : .secondary)
                     .frame(width: 26, height: 24)
-                    .background(Color.primary.opacity(hovering ? 0.09 : 0.05), in: RoundedRectangle(cornerRadius: 6))
+                    .background(Color.primary.opacity(hovering ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
             .disabled(session.resumeBlocker != nil)

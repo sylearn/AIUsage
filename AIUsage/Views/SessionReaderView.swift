@@ -22,152 +22,180 @@ struct SessionReaderView: View {
     // MARK: Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 8) {
-                ProviderIconView(session.tool.rawValue, size: 16)
-                Text(session.tool.displayName)
-                    .font(.system(size: 12, weight: .semibold))
-                Text(session.sessionID)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(AppContent.tertiary(colorScheme))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                if session.isPinned {
-                    badge(L("Pinned", "已置顶", key: "sessions.badge.pinned"), tint: AppContent.secondary(colorScheme))
-                }
-                if let activity = session.activity {
-                    SessionActivityLabel(activity: activity, tool: session.tool)
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(AppContent.secondary(colorScheme))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(SessionActivityDot.tint(activity, colorScheme).opacity(0.13), in: Capsule())
-                }
-                if let blocker = session.resumeBlocker {
-                    badge(Self.blockerText(blocker), tint: .orange)
-                }
-                Spacer(minLength: 12)
-                actions
+        VStack(alignment: .leading, spacing: 10) {
+            // 窗口窄时依次收起：按钮文字缩短 → 工具名称 → 复制按钮（「更多」菜单里也有）→ 状态只留圆点，保证一行放下、不折行。
+            ViewThatFits(in: .horizontal) {
+                headerBar(showToolName: true, compactResume: false)
+                headerBar(showToolName: true, compactResume: true)
+                headerBar(showToolName: false, compactResume: true)
+                headerBar(showToolName: false, compactResume: true, showsCopy: false)
+                headerBar(showToolName: false, compactResume: true, showsCopy: false, compactBadges: true)
             }
             Text(session.title)
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(AppContent.primary(colorScheme))
+                .lineLimit(3)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            FlowLayout(spacing: 6, lineSpacing: 6) {
-                if let directory = session.directory {
-                    chip(systemImage: "folder", text: Self.abbreviated(directory), monospaced: true)
-                        .help(directory)
-                }
-                if let branch = session.gitBranch {
-                    chip(systemImage: "arrow.triangle.branch", text: branch, monospaced: true)
-                }
-                if let model = session.model {
-                    chip(systemImage: "cpu", text: model)
-                }
-                if let prompts = session.promptCount {
-                    chip(systemImage: "text.bubble", text: L("\(prompts) prompts", "\(prompts) 轮提问"))
-                }
-                if let tokens = session.tokens {
-                    chip(systemImage: "number", text: formatCompactNumber(Double(tokens)) + " tokens")
-                        .help(L("Cumulative tokens recorded by the tool, cache reads included.",
-                                "工具记录的累计 token，含缓存读取。", key: "sessions.tokens.help"))
-                }
-                chip(systemImage: "clock", text: L("Updated ", "更新于 ", key: "sessions.updated_prefix")
-                     + SessionDateText.full(session.updatedAt))
-            }
+                .help(session.title)
+            metadata
         }
         .padding(.horizontal, 28)
-        .padding(.top, 18)
+        .padding(.top, 14)
         .padding(.bottom, 16)
+        .background(alignment: .topLeading) {
+            // ⌘↩ 继续：拆分按钮的主动作不能直接挂快捷键，用一个隐藏按钮承接。
+            Button("") { Task { await store.resume(session) } }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(session.resumeBlocker != nil)
+                .hidden()
+        }
     }
 
-    private var actions: some View {
-        HStack(spacing: 6) {
-            Button {
-                store.copyCommand(session)
-            } label: {
-                Image(systemName: "doc.on.doc")
+    private func headerBar(showToolName: Bool, compactResume: Bool, showsCopy: Bool = true, compactBadges: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            ProviderIconView(session.tool.rawValue, size: 16)
+                .help(session.tool.displayName)
+            if showToolName {
+                Text(session.tool.displayName)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(AppContent.secondary(colorScheme))
+                    .fixedSize()
             }
-            .help(L("Copy Resume Command", "复制恢复命令", key: "sessions.action.copy_command"))
-            .accessibilityLabel(L("Copy Resume Command", "复制恢复命令", key: "sessions.action.copy_command"))
-            .disabled(session.resumeBlocker == .directoryMissing)
+            if session.isPinned, !compactBadges {
+                badge(L("Pinned", "已置顶", key: "sessions.badge.pinned"), tint: AppContent.secondary(colorScheme))
+            }
+            if let activity = session.activity {
+                if compactBadges {
+                    SessionActivityDot(activity: activity)
+                        .help(SessionActivityLabel.title(activity))
+                } else {
+                    SessionActivityLabel(activity: activity, tool: session.tool)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SessionActivityDot.tint(activity, colorScheme))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(SessionActivityDot.tint(activity, colorScheme).opacity(0.13), in: Capsule())
+                        .fixedSize()
+                }
+            }
+            if let blocker = session.resumeBlocker {
+                if compactBadges {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .help(Self.blockerText(blocker))
+                } else {
+                    badge(Self.blockerText(blocker), tint: .orange)
+                }
+            }
+            Spacer(minLength: 12)
+            actions(compactResume: compactResume, showsCopy: showsCopy)
+        }
+        .frame(minHeight: 28)
+    }
+
+    private func actions(compactResume: Bool, showsCopy: Bool) -> some View {
+        HStack(spacing: 2) {
+            if showsCopy {
+                Button {
+                    store.copyCommand(session)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(SessionIconButtonStyle())
+                .help(L("Copy Resume Command", "复制恢复命令", key: "sessions.action.copy_command"))
+                .accessibilityLabel(L("Copy Resume Command", "复制恢复命令", key: "sessions.action.copy_command"))
+                .disabled(session.resumeBlocker == .directoryMissing)
+            }
 
             Menu {
                 SessionActionsMenu(store: store, session: session)
             } label: {
                 Image(systemName: "ellipsis")
             }
+            .menuStyle(.button)
+            .buttonStyle(SessionIconButtonStyle())
             .menuIndicator(.hidden)
             .fixedSize()
             .help(L("More", "更多", key: "sessions.action.more"))
 
-            Button {
-                Task { await store.resume(session) }
-            } label: {
-                Label(L("Resume in \(store.terminal.displayName)", "在 \(store.terminal.displayName) 中继续"),
-                      systemImage: "terminal")
-                    .fontWeight(.semibold)
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(session.resumeBlocker != nil)
-            .help(session.resumeBlocker.map { Self.blockerText($0) }
-                  ?? (L("Resume this session (⌘↩)", "继续这个会话（⌘↩）", key: "sessions.action.resume_help")
-                      + (store.terminal.confirmationNote.map { " · " + $0 } ?? "")))
-
-            Menu {
-                Section(L("Resume in", "在哪个终端继续", key: "sessions.terminal.menu_title")) {
-                    ForEach(store.availableTerminals) { terminal in
-                        Button {
-                            store.setTerminal(terminal)
-                        } label: {
-                            if terminal == store.terminal {
-                                Label(terminal.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(terminal.displayName)
-                            }
-                        }
-                    }
-                }
-                if let note = store.terminal.confirmationNote {
-                    Text(note)
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-            }
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(L("Choose terminal", "选择终端", key: "sessions.terminal.choose"))
+            SessionResumeButton(store: store, session: session, compact: compactResume)
+                .disabled(session.resumeBlocker != nil)
+                .padding(.leading, 6)
         }
-        .controlSize(.regular)
     }
 
-    private func chip(systemImage: String, text: String, monospaced: Bool = false) -> some View {
+    /// 元信息固定两行：第一行在哪（目录、分支），第二行是概况。都不换行，放不下时第一行从中间截断，
+    /// 第二行从最不重要的一项开始收起，所以窄窗口下头部高度不变。
+    private var metadata: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if session.directory != nil || session.gitBranch != nil {
+                HStack(spacing: 14) {
+                    if let directory = session.directory {
+                        metaItem("folder", Self.abbreviated(directory))
+                            .help(directory)
+                            .layoutPriority(1)
+                    }
+                    if let branch = session.gitBranch {
+                        metaItem("arrow.triangle.branch", branch, monospaced: true)
+                    }
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                facts(model: true, tokens: true, id: true)
+                facts(model: true, tokens: true, id: false)
+                facts(model: false, tokens: true, id: false)
+                facts(model: false, tokens: false, id: false)
+            }
+        }
+    }
+
+    private func facts(model showsModel: Bool, tokens showsTokens: Bool, id showsID: Bool) -> some View {
+        HStack(spacing: 14) {
+            metaItem("clock", L("Updated ", "更新于 ", key: "sessions.updated_prefix") + SessionDateText.short(session.updatedAt))
+                .help(SessionDateText.full(session.updatedAt))
+            if let prompts = session.promptCount {
+                metaItem("text.bubble", L(SessionPlural.en(prompts, "prompt"), "\(prompts) 轮提问"))
+            }
+            if showsTokens, let tokens = session.tokens {
+                metaItem("number", formatCompactNumber(Double(tokens)) + " tokens")
+                    .help(L("Cumulative tokens recorded by the tool, cache reads included.",
+                            "工具记录的累计 token，含缓存读取。", key: "sessions.tokens.help"))
+            }
+            if showsModel, let model = session.model {
+                metaItem("cpu", model)
+            }
+            if showsID {
+                metaItem("number.square", String(session.sessionID.prefix(8)), monospaced: true)
+                    .help(session.sessionID)
+            }
+        }
+        .fixedSize()
+    }
+
+    private func metaItem(_ systemImage: String, _ text: String, monospaced: Bool = false) -> some View {
         HStack(spacing: 5) {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(AppContent.tertiary(colorScheme))
             Text(text)
-                .font(.system(size: 11.5, design: monospaced ? .monospaced : .default))
+                .font(.system(size: monospaced ? 11.5 : 12, design: monospaced ? .monospaced : .default))
+                .foregroundStyle(AppContent.secondary(colorScheme))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .foregroundStyle(AppContent.secondary(colorScheme))
-        .padding(.horizontal, 8)
-        .frame(height: 22)
-        .frame(maxWidth: 420, alignment: .leading)
-        .background(AppSurface.chip(colorScheme), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     private func badge(_ text: String, tint: Color) -> some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(tint)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
             .background(tint.opacity(0.12), in: Capsule())
+            .lineLimit(1)
+            .fixedSize()
     }
 
     // MARK: Content
@@ -268,7 +296,7 @@ private struct SessionTranscriptView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
                             if transcript.omittedCount > 0 {
-                                Text(L("\(transcript.omittedCount) earlier items omitted", "已省略 \(transcript.omittedCount) 条较早的内容"))
+                                Text(L(SessionPlural.en(transcript.omittedCount, "earlier item") + " omitted", "已省略 \(transcript.omittedCount) 条较早的内容"))
                                     .font(.system(size: 11.5))
                                     .foregroundStyle(AppContent.tertiary(colorScheme))
                                     .frame(maxWidth: .infinity)
@@ -352,11 +380,11 @@ private struct SessionTranscriptView: View {
                                     .multilineTextAlignment(.leading)
                             }
                             .padding(.vertical, 5)
-                            .padding(.horizontal, 4)
+                            .padding(.horizontal, 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(SessionRowButtonStyle())
                     }
                 }
             }
@@ -405,7 +433,7 @@ private struct TranscriptItemView: View {
         switch item.entry {
         case .prompt(let text):
             HStack {
-                Spacer(minLength: 72)
+                Spacer(minLength: 48)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(L("You", "你", key: "sessions.you") + (item.date.map { " · " + Self.time($0) } ?? ""))
                         .font(.system(size: 11))
@@ -427,7 +455,7 @@ private struct TranscriptItemView: View {
                     .padding(.top, 1)
                 MessageText(text: text, terms: terms)
             }
-            .padding(.trailing, 40)
+            .padding(.trailing, 16)
         case .steps(let steps):
             StepGroupView(steps: steps, terms: terms)
                 .padding(.leading, 30)
@@ -468,6 +496,7 @@ private struct StepGroupView: View {
     let steps: [ToolStep]
     let terms: [String]
     @State private var expanded: Bool
+    @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
 
     /// 有失败步骤，或搜索词命中某一步时默认展开。
@@ -490,13 +519,13 @@ private struct StepGroupView: View {
     private var failures: Int { steps.filter(\.failed).count }
 
     private var summary: String {
-        var parts = [L("\(steps.count) steps", "\(steps.count) 步")]
+        var parts = [L(SessionPlural.en(steps.count, "step"), "\(steps.count) 步")]
         let reads = Set(steps.filter { $0.kind == .read }.flatMap(\.paths)).count
         let edits = Set(steps.filter { $0.kind == .edit && !$0.failed }.flatMap(\.paths)).count
         let commands = steps.filter { $0.kind == .command }.count
-        if reads > 0 { parts.append(L("read \(reads) files", "读 \(reads) 个文件")) }
-        if edits > 0 { parts.append(L("changed \(edits) files", "改 \(edits) 个文件")) }
-        if commands > 0 { parts.append(L("ran \(commands) commands", "运行 \(commands) 条命令")) }
+        if reads > 0 { parts.append(L("read " + SessionPlural.en(reads, "file"), "读 \(reads) 个文件")) }
+        if edits > 0 { parts.append(L("changed " + SessionPlural.en(edits, "file"), "改 \(edits) 个文件")) }
+        if commands > 0 { parts.append(L("ran " + SessionPlural.en(commands, "command"), "运行 \(commands) 条命令")) }
         return parts.joined(separator: " · ")
     }
 
@@ -516,9 +545,13 @@ private struct StepGroupView: View {
                     Text(summary)
                         .font(.system(size: 12.5))
                         .foregroundStyle(AppContent.secondary(colorScheme))
-                    Spacer(minLength: 8)
+                        .lineLimit(1)
+                    if expanded {
+                        Spacer(minLength: 8)
+                    }
                     if failures > 0 {
                         Label(L("\(failures) failed", "\(failures) 次失败"), systemImage: "exclamationmark.circle.fill")
+                            .labelStyle(SessionCompactLabelStyle())
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.orange)
                             .padding(.horizontal, 7)
@@ -526,8 +559,9 @@ private struct StepGroupView: View {
                             .background(Color.orange.opacity(0.13), in: Capsule())
                     }
                 }
-                .padding(.horizontal, 12)
-                .frame(height: 34)
+                .padding(.leading, 11)
+                .padding(.trailing, failures > 0 ? 6 : 13)
+                .frame(height: 30)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -545,9 +579,13 @@ private struct StepGroupView: View {
                 .padding(.vertical, 10)
             }
         }
-        .background(AppSurface.card(colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+        // 折叠时只包住摘要那一行，展开后占满宽度，避免一屏都是通栏的空卡片。
+        .frame(maxWidth: expanded ? .infinity : nil, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(hovering && !expanded ? AppSurface.elevated(colorScheme) : AppSurface.card(colorScheme)))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
             .stroke(failures > 0 ? Color.orange.opacity(0.35) : AppStroke.subtle(colorScheme)))
+        .onHover { hovering = $0 }
     }
 }
 
@@ -655,6 +693,11 @@ private struct MessageText: View {
 
     private func highlighted(_ string: AttributedString) -> AttributedString {
         var string = string
+        // 行内代码只有等宽字体不够醒目，加一层浅底色；搜索高亮在后面覆盖。
+        let codeBackground = AppSurface.chip(colorScheme)
+        for run in string.runs where run.inlinePresentationIntent?.contains(.code) == true {
+            string[run.range].backgroundColor = codeBackground
+        }
         SessionHighlight.apply(to: &string, terms: terms, scheme: colorScheme)
         return string
     }
@@ -771,7 +814,175 @@ struct SessionActivityDot: View {
             }
     }
 
+    /// 进行中用绿色；等待输入用琥珀色，提示需要你回去处理。两种外观各调一档，保证文字对比度。
     static func tint(_ activity: SessionActivity, _ scheme: ColorScheme) -> Color {
-        activity == .working ? Color.green : AppContent.tertiary(scheme)
+        switch (activity, scheme) {
+        case (.working, .dark): return Color(red: 0.36, green: 0.82, blue: 0.52)
+        case (.working, _): return Color(red: 0.10, green: 0.56, blue: 0.29)
+        case (.waiting, .dark): return Color(red: 0.97, green: 0.74, blue: 0.32)
+        case (.waiting, _): return Color(red: 0.76, green: 0.47, blue: 0.02)
+        }
+    }
+}
+
+// MARK: - Shared controls
+
+/// 主按钮「在 X 中继续」：左半边直接继续，右半边的箭头选终端。
+/// 系统的拆分按钮（Menu + primaryAction）不吃 borderedProminent，这里自己画成强调色，两种外观下都醒目。
+struct SessionResumeButton: View {
+    @ObservedObject var store: SessionCenterStore
+    let session: SessionSummary
+    let compact: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button {
+                Task { await store.resume(session) }
+            } label: {
+                Label(compact
+                      ? L("Resume", "继续", key: "sessions.action.resume_short")
+                      : L("Resume in \(store.terminal.displayName)", "在 \(store.terminal.displayName) 中继续"),
+                      systemImage: "terminal")
+                    .labelStyle(SessionCompactLabelStyle(spacing: 6))
+                    .padding(.leading, 11)
+                    .padding(.trailing, 9)
+            }
+            .buttonStyle(SessionPrimarySegmentStyle())
+            .help(session.resumeBlocker.map { SessionReaderView.blockerText($0) }
+                  ?? (L("Resume this session (⌘↩)", "继续这个会话（⌘↩）", key: "sessions.action.resume_help")
+                      + (store.terminal.confirmationNote.map { " · " + $0 } ?? "")))
+
+            Rectangle()
+                .fill(Color.white.opacity(0.28))
+                .frame(width: 1, height: 16)
+
+            Menu {
+                Section(L("Resume in", "在哪个终端继续", key: "sessions.terminal.menu_title")) {
+                    ForEach(store.availableTerminals) { terminal in
+                        Button {
+                            store.setTerminal(terminal)
+                        } label: {
+                            if terminal == store.terminal {
+                                Label(terminal.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(terminal.displayName)
+                            }
+                        }
+                    }
+                }
+                if let note = store.terminal.confirmationNote {
+                    Text(note)
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .frame(width: 26)
+            }
+            .menuStyle(.button)
+            .buttonStyle(SessionPrimarySegmentStyle())
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(L("Choose terminal", "选择终端", key: "sessions.terminal.choose"))
+        }
+        .font(.system(size: 12.5, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(height: 28)
+        .background(AppAccent.control(colorScheme), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .shadow(color: AppAccent.control(colorScheme).opacity(colorScheme == .dark ? 0 : 0.25), radius: 3, y: 1)
+        .opacity(isEnabled ? 1 : 0.45)
+        .fixedSize()
+    }
+}
+
+/// 主按钮每一半的按压与悬停反馈：在强调色上叠白（悬停）或叠黑（按下）。
+struct SessionPrimarySegmentStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyledLabel(configuration: configuration)
+    }
+
+    private struct StyledLabel: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .frame(maxHeight: .infinity)
+                .background(configuration.isPressed ? Color.black.opacity(0.14) : hovering ? Color.white.opacity(0.12) : .clear)
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// 头部图标按钮：平时只有图标，悬停出底色，按下再深一档。Menu（.menuStyle(.button)）也用它。
+struct SessionIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyledLabel(configuration: configuration)
+    }
+
+    private struct StyledLabel: View {
+        let configuration: Configuration
+        @Environment(\.colorScheme) private var colorScheme
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppContent.secondary(colorScheme))
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(fill))
+                .opacity(isEnabled ? 1 : 0.4)
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+        }
+
+        private var fill: Color {
+            if configuration.isPressed { return AppSurface.selection(colorScheme) }
+            return hovering && isEnabled ? AppSurface.chip(colorScheme) : .clear
+        }
+    }
+}
+
+/// 列表型按钮（大纲条目等）：悬停出浅底色。
+struct SessionRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyledLabel(configuration: configuration)
+    }
+
+    private struct StyledLabel: View {
+        let configuration: Configuration
+        @Environment(\.colorScheme) private var colorScheme
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(
+                    configuration.isPressed ? AppSurface.selection(colorScheme)
+                        : hovering ? AppSurface.chip(colorScheme).opacity(0.7) : .clear))
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// 图标和文字靠得更近的 Label，用于小号徽标。
+struct SessionCompactLabelStyle: LabelStyle {
+    var spacing: CGFloat = 3
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: spacing) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+/// 英文单复数。中文没有这个问题，直接写在中文文案里。
+enum SessionPlural {
+    static func en(_ count: Int, _ singular: String, _ plural: String? = nil) -> String {
+        "\(count) " + (count == 1 ? singular : plural ?? singular + "s")
     }
 }
