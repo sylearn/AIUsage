@@ -304,7 +304,7 @@ Claude Code 与 Codex 的用量、计费、缓存和归档细节见 [docs/USAGE_
 |------|------|
 | **统一列表** | Claude Code、Codex、OpenCode 的会话按时间（置顶、今天、昨天、本周、更早）或项目分组；按标题、目录、分支、会话 ID 和提问内容搜索 |
 | **阅读视图** | 提问与回复分开排版，工具调用折叠成一行摘要（几步、读改了几个文件），失败步骤橙色标出并给出原因；右侧大纲点击跳转 |
-| **一键继续** | 在 Ghostty、Warp 或系统终端里回到原项目目录继续这段会话；也可以复制恢复命令或导出 Markdown |
+| **一键继续** | 回到原项目目录继续这段会话，支持系统终端、iTerm2、Ghostty、Warp、WezTerm、Kaku、kitty、Alacritty（只列出已安装的）；也可以复制恢复命令或导出 Markdown |
 | **菜单栏** | 最近 4 个会话，不打开主窗口也能继续 |
 
 > Claude Code 默认只保留 30 天会话（`settings.json` 的 `cleanupPeriodDays` 可调）；Codex 只剩压缩记录的会话无法预览，但仍可继续。设计与后续规划见 [docs/SESSION_CENTER_DESIGN.md](docs/SESSION_CENTER_DESIGN.md)。

@@ -301,6 +301,53 @@ final class SessionCatalogTests: XCTestCase {
         }
     }
 
+    // MARK: Terminals
+
+    func testTerminalsKeepStoredValuesAndOpenScriptsDirectly() {
+        // 已发布版本存过这三个值，改名会让用户的选择失效。
+        XCTAssertEqual(SessionTerminal(rawValue: "ghostty"), .ghostty)
+        XCTAssertEqual(SessionTerminal(rawValue: "warp"), .warp)
+        XCTAssertEqual(SessionTerminal(rawValue: "terminal"), .terminal)
+        XCTAssertEqual(SessionTerminal.allCases.last, .terminal, "系统终端只做兜底")
+        XCTAssertEqual(Set(SessionTerminal.allCases.map(\.bundleIdentifier)).count, SessionTerminal.allCases.count)
+
+        for terminal in [SessionTerminal.ghostty, .iterm2, .warp, .wezterm, .kaku, .terminal] {
+            XCTAssertEqual(terminal.launchMethod(scriptPath: "/tmp/x.command"), .openScript, terminal.rawValue)
+        }
+    }
+
+    func testNewInstanceTerminalsRunTheExactScript() throws {
+        let directory = home + "/it's a dir"
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let script = directory + "/resume me.command"
+        let marker = home + "/marker"
+        try "#!/bin/sh\nprintf '%s' \"$0\" > \(SessionResumePlan.quote(marker))\n"
+            .write(toFile: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script)
+
+        for terminal in [SessionTerminal.kitty, .alacritty] {
+            guard case .newInstance(let arguments) = terminal.launchMethod(scriptPath: script) else {
+                return XCTFail("\(terminal.rawValue) 应新开实例")
+            }
+            XCTAssertFalse(arguments.contains(script), "脚本路径单独出现在参数里会被 macOS 当成要打开的文件")
+            XCTAssertEqual(Array(arguments.suffix(3).prefix(2)), ["/bin/sh", "-c"])
+
+            try? FileManager.default.removeItem(atPath: marker)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = Array(arguments.suffix(2))
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0, terminal.rawValue)
+            XCTAssertEqual(try String(contentsOfFile: marker, encoding: .utf8), script, terminal.rawValue)
+        }
+
+        guard case .newInstance(let kitty) = SessionTerminal.kitty.launchMethod(scriptPath: script),
+              case .newInstance(let alacritty) = SessionTerminal.alacritty.launchMethod(scriptPath: script) else { return }
+        XCTAssertEqual(Array(kitty.prefix(2)), ["-o", "macos_quit_when_last_window_closed=yes"])
+        XCTAssertEqual(alacritty.first, "-e", "Alacritty 的 -e 必须是最后一个选项，后面整段都是命令")
+    }
+
     // MARK: Export
 
     func testMarkdownExport() throws {

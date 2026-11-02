@@ -42,8 +42,10 @@ final class SessionCenterStore: ObservableObject {
     @Published private(set) var selectedID: String?
     @Published private(set) var transcriptState: TranscriptState = .idle
     @Published var flash: AppFlash?
-    /// 「继续对话」使用的终端；启动时解析一次（查询 LaunchServices），切换时再更新。
-    @Published private(set) var terminal: SessionTerminal = SessionCenterStore.resolvedTerminal()
+    /// 已安装的终端（查询 LaunchServices），启动时取一次，之后随扫描刷新。
+    @Published private(set) var availableTerminals: [SessionTerminal]
+    /// 「继续对话」使用的终端。
+    @Published private(set) var terminal: SessionTerminal
 
     private let catalog = SessionCatalog.shared
     private let settings = AppSettings.shared
@@ -55,6 +57,9 @@ final class SessionCenterStore: ObservableObject {
     private static let minimumScanInterval: TimeInterval = 5
 
     private init() {
+        let installed = SessionTerminal.installed
+        availableTerminals = installed
+        terminal = Self.resolvedTerminal(installed: installed)
         Task.detached(priority: .background) { TerminalLauncher.removeStaleScripts() }
     }
 
@@ -122,10 +127,17 @@ final class SessionCenterStore: ObservableObject {
         settings.sessionResumeTerminal = terminal.rawValue
     }
 
-    /// 记住的终端仍已安装就用它，否则按 Ghostty → Warp → 终端 取第一个已安装的。
-    private static func resolvedTerminal() -> SessionTerminal {
-        SessionTerminal(rawValue: AppSettings.shared.sessionResumeTerminal).flatMap { $0.isInstalled ? $0 : nil }
-            ?? .preferredDefault
+    /// 记住的终端仍已安装就用它，否则按 SessionTerminal 的顺序取第一个已安装的，系统终端兜底。
+    private static func resolvedTerminal(installed: [SessionTerminal]) -> SessionTerminal {
+        SessionTerminal(rawValue: AppSettings.shared.sessionResumeTerminal).flatMap { installed.contains($0) ? $0 : nil }
+            ?? installed.first ?? .terminal
+    }
+
+    /// 用户装上或卸载终端后，菜单与默认终端跟着更新。
+    private func refreshTerminals() {
+        let installed = SessionTerminal.installed
+        if installed != availableTerminals { availableTerminals = installed }
+        if !installed.contains(terminal) { terminal = Self.resolvedTerminal(installed: installed) }
     }
 
     // MARK: Loading
@@ -134,6 +146,7 @@ final class SessionCenterStore: ObservableObject {
     func refresh(force: Bool = false) async {
         if isScanning { return }
         if !force, let lastScan, Date().timeIntervalSince(lastScan) < Self.minimumScanInterval { return }
+        refreshTerminals()
         isScanning = true
         let catalog = catalog
         let result = await Task.detached(priority: .userInitiated) { catalog.scan() }.value

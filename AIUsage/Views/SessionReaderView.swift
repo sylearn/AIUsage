@@ -110,19 +110,16 @@ struct SessionReaderView: View {
 
             Menu {
                 Section(L("Resume in", "在哪个终端继续", key: "sessions.terminal.menu_title")) {
-                    ForEach(SessionTerminal.allCases) { terminal in
+                    ForEach(store.availableTerminals) { terminal in
                         Button {
                             store.setTerminal(terminal)
                         } label: {
                             if terminal == store.terminal {
                                 Label(terminal.displayName, systemImage: "checkmark")
                             } else {
-                                Text(terminal.isInstalled
-                                     ? terminal.displayName
-                                     : terminal.displayName + " · " + L("not installed", "未安装", key: "sessions.terminal.missing"))
+                                Text(terminal.displayName)
                             }
                         }
-                        .disabled(!terminal.isInstalled)
                     }
                 }
                 if let note = store.terminal.confirmationNote {

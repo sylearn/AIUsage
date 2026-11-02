@@ -2,51 +2,48 @@ import AppKit
 import QuotaBackend
 
 // MARK: - Terminal Launcher
-// 会话中心「继续对话」：把一次性 .command 脚本交给用户选的终端打开。
-// 三种终端走同一条路：NSWorkspace 用指定应用打开脚本。不用 AppleScript（Hardened Runtime 下需要额外授权）。
-// 实测（2026-11）：终端、Warp 直接执行；Ghostty 出于安全策略会先弹「Allow Ghostty to execute …?」确认一次。
+// 会话中心「继续对话」：把一次性 .command 脚本交给用户选的终端。
+// 支持哪些终端、各自怎么启动定义在 QuotaBackend 的 SessionTerminal（可单测）；这里只负责显示名、安装检测和调用 NSWorkspace。
+// 不用 AppleScript（Hardened Runtime 下需要额外 entitlement 和自动化授权）。
 // 设计文档：docs/SESSION_CENTER_DESIGN.md §4
 
-enum SessionTerminal: String, CaseIterable, Identifiable {
-    case ghostty
-    case warp
-    case terminal
-
-    var id: String { rawValue }
-
-    var bundleIdentifier: String {
-        switch self {
-        case .ghostty: return "com.mitchellh.ghostty"
-        case .warp: return "dev.warp.Warp-Stable"
-        case .terminal: return "com.apple.Terminal"
-        }
-    }
-
+extension SessionTerminal {
     var displayName: String {
         switch self {
         case .ghostty: return "Ghostty"
+        case .iterm2: return "iTerm2"
         case .warp: return "Warp"
+        case .wezterm: return "WezTerm"
+        case .kaku: return "Kaku"
+        case .kitty: return "kitty"
+        case .alacritty: return "Alacritty"
         case .terminal: return L("Terminal", "终端", key: "sessions.terminal.apple")
         }
     }
 
-    /// 启动前需要用户在终端里确认一次的说明；nil 表示直接执行。
+    /// 终端在执行前会请用户确认时的说明；nil 表示直接执行。
     var confirmationNote: String? {
-        self == .ghostty
-            ? L("Ghostty asks once before running", "Ghostty 会先请你确认一次", key: "sessions.terminal.ghostty_confirm")
-            : nil
+        switch self {
+        case .ghostty:
+            return L("Ghostty asks before running", "Ghostty 会先请你确认", key: "sessions.terminal.ghostty_confirm")
+        case .iterm2:
+            return L("iTerm2 asks before running; you can turn the prompt off there",
+                     "iTerm2 会先请你确认，可在弹窗里选择不再询问", key: "sessions.terminal.iterm2_confirm")
+        case .warp, .wezterm, .kaku, .kitty, .alacritty, .terminal:
+            return nil
+        }
     }
 
+    /// 废纸篓里的应用不算已安装。
     var applicationURL: URL? {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+            .flatMap { $0.path.contains("/.Trash/") ? nil : $0 }
     }
 
     var isInstalled: Bool { applicationURL != nil }
 
-    /// 默认终端：按 Ghostty → Warp → 终端 取第一个已安装的。
-    static var preferredDefault: SessionTerminal {
-        allCases.first(where: \.isInstalled) ?? .terminal
-    }
+    /// 已安装的终端，按默认优先级排列。
+    static var installed: [SessionTerminal] { allCases.filter(\.isInstalled) }
 }
 
 enum TerminalLauncherError: LocalizedError {
@@ -79,7 +76,14 @@ enum TerminalLauncher {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         do {
-            _ = try await NSWorkspace.shared.open([script], withApplicationAt: appURL, configuration: configuration)
+            switch terminal.launchMethod(scriptPath: script.path) {
+            case .openScript:
+                _ = try await NSWorkspace.shared.open([script], withApplicationAt: appURL, configuration: configuration)
+            case .newInstance(let arguments):
+                configuration.createsNewApplicationInstance = true
+                configuration.arguments = arguments
+                _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+            }
         } catch {
             try? FileManager.default.removeItem(at: script)
             throw TerminalLauncherError.openFailed(error.localizedDescription)

@@ -1409,9 +1409,9 @@
 "sessions.step.ok" = "成功";
 "sessions.terminal.apple" = "终端";
 "sessions.terminal.choose" = "选择终端";
-"sessions.terminal.ghostty_confirm" = "Ghostty 会先请你确认一次";
+"sessions.terminal.ghostty_confirm" = "Ghostty 会先请你确认";
+"sessions.terminal.iterm2_confirm" = "iTerm2 会先请你确认，可在弹窗里选择不再询问";
 "sessions.terminal.menu_title" = "在哪个终端继续";
-"sessions.terminal.missing" = "未安装";
 "sessions.tokens.help" = "工具记录的累计 token，含缓存读取。";
 "sessions.unavailable.codex" = "Codex 只保留了这个会话的压缩记录，无法预览，仍可继续对话。";
 "sessions.unavailable.generic" = "原工具没有留下可读的内容。";

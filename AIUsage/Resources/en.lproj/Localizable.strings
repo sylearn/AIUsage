@@ -1409,9 +1409,9 @@
 "sessions.step.ok" = "Succeeded";
 "sessions.terminal.apple" = "Terminal";
 "sessions.terminal.choose" = "Choose terminal";
-"sessions.terminal.ghostty_confirm" = "Ghostty asks once before running";
+"sessions.terminal.ghostty_confirm" = "Ghostty asks before running";
+"sessions.terminal.iterm2_confirm" = "iTerm2 asks before running; you can turn the prompt off there";
 "sessions.terminal.menu_title" = "Resume in";
-"sessions.terminal.missing" = "not installed";
 "sessions.tokens.help" = "Cumulative tokens recorded by the tool, cache reads included.";
 "sessions.unavailable.codex" = "Codex kept only a compressed copy of this session. You can still resume it.";
 "sessions.unavailable.generic" = "The tool left no readable content for this session.";

@@ -304,7 +304,7 @@ Your coding-CLI history in one place. Open **Sessions** in the sidebar or **Rece
 |------------|-------------|
 | **One list** | Claude Code, Codex and OpenCode sessions grouped by time (pinned, today, yesterday, this week, earlier) or by project; search titles, folders, branches, session IDs and prompts |
 | **Reading view** | Prompts and replies laid out separately, tool calls folded into one-line summaries (steps, files read and changed), failed steps highlighted with their error; outline on the right to jump between turns |
-| **One-click resume** | Continue the session in Ghostty, Warp or Terminal from its original project folder; or copy the resume command, or export Markdown |
+| **One-click resume** | Continue the session from its original project folder in Terminal, iTerm2, Ghostty, Warp, WezTerm, Kaku, kitty or Alacritty (installed ones are listed); or copy the resume command, or export Markdown |
 | **Menu bar** | The 4 most recent sessions, resumable without opening the main window |
 
 > Claude Code keeps sessions for 30 days by default (`cleanupPeriodDays` in `settings.json`). Codex sessions that only remain as compressed archives can't be previewed but can still be resumed. Design and roadmap: [docs/SESSION_CENTER_DESIGN.md](docs/SESSION_CENTER_DESIGN.md).
