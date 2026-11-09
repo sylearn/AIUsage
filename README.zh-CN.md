@@ -69,18 +69,6 @@
       <a href="https://api-aimodels.com/register?channel=c_tinvzu4g"><strong>访问 Sucloud →</strong></a>
     </td>
   </tr>
-  <tr>
-    <td width="132" align="center">
-      <a href="https://baipiao.org/"><img src="docs/images/baipiao-logo.jpg" alt="白嫖 BaiPiao" width="88"></a><br>
-      <strong>白嫖 BaiPiao</strong>
-    </td>
-    <td>
-      <strong>白嫖有门路，好东西不迷路。</strong><br>
-      AI 福利与免费资源分享社区，汇集免费 API 额度、AI 工具、服务器与域名资源。<br>
-      查订阅价格、看中转测评，与社区用户一起发现好资源、交流使用经验。<br>
-      <a href="https://baipiao.org/"><strong>逛逛白嫖社区 · baipiao.org →</strong></a>
-    </td>
-  </tr>
 </table>
 </details>
 

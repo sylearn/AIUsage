@@ -69,18 +69,6 @@
       <a href="https://api-aimodels.com/register?channel=c_tinvzu4g"><strong>Visit Sucloud →</strong></a>
     </td>
   </tr>
-  <tr>
-    <td width="132" align="center">
-      <a href="https://baipiao.org/"><img src="docs/images/baipiao-logo.jpg" alt="BaiPiao" width="88"></a><br>
-      <strong>BaiPiao</strong>
-    </td>
-    <td>
-      <strong>Find your way to freebies. Keep the good stuff in sight.</strong><br>
-      A community for AI freebies and free resources: API credits, AI tools, servers, and domains.<br>
-      Compare subscription prices, explore API relay reviews, and share useful finds and hands-on experiences.<br>
-      <a href="https://baipiao.org/"><strong>Explore BaiPiao · baipiao.org →</strong></a>
-    </td>
-  </tr>
 </table>
 </details>
 
