@@ -282,6 +282,7 @@ struct ProviderPresetQuickSetup: View {
 // MARK: - Sidebar Sponsor Spot
 
 /// 侧边栏左下角的合作推荐位：两行小字、低对比底色，悬停时才显出品牌色与跳转箭头。
+/// 卡片上不写「赞助」字样，保持安静；赞助说明放在悬停提示与无障碍标签里，保持透明。
 struct SidebarSponsorSpot: View {
     let preset: ProviderPreset
     let onHide: () -> Void
@@ -305,22 +306,20 @@ struct SidebarSponsorSpot: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer(minLength: 2)
-                Group {
-                    if isHovered {
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(preset.brandColor)
-                    } else {
-                        Text(L("Sponsor", "赞助"))
-                            .font(.system(size: 8.5, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .frame(minWidth: 18, alignment: .trailing)
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
+            // 箭头浮在右侧而不占布局：侧边栏最窄时第二行文案也能完整显示，悬停时文字不跳动。
+            .overlay(alignment: .trailing) {
+                if isHovered {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(preset.brandColor)
+                        .padding(.trailing, 9)
+                        .transition(.opacity)
+                }
+            }
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(isHovered ? preset.brandColor.opacity(0.10) : Color.primary.opacity(0.035))

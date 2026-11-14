@@ -138,7 +138,7 @@ enum ProviderPresetCatalog {
     static let apiModels = ProviderPreset(
         id: "api-models",
         name: "API Models",
-        tagline: .init(en: "Low-cost AI models", zh: "低价 AI 模型"),
+        tagline: .init(en: "One key for every major model", zh: "一个 Key 用遍主流模型"),
         detail: .init(
             en: "Claude, GPT, Gemini and more through one key, at low prices. Works with Claude Code, Codex and OpenCode.",
             zh: "一个 Key 用遍 Claude、GPT、Gemini 等主流模型，价格低。支持 Claude Code、Codex 与 OpenCode。"
