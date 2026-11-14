@@ -39,6 +39,11 @@ struct OpenCodeManagementView: View {
     static let brand = Color(red: 0.18, green: 0.83, blue: 0.75)
 
     var body: some View {
+        bodyContent
+            .modelSyncFlashOverlay()
+    }
+
+    private var bodyContent: some View {
         VStack(spacing: 0) {
             if store.nodes.isEmpty {
                 VStack(spacing: 16) {

@@ -6,113 +6,99 @@ import SwiftUI
 // 取代原先 ProxyConfigEditorView 与 CodexProxyEditorView 里的两份重复实现。
 // 数据来源: 上游 GET /v1/models（OpenAI 兼容）或 GET <base>/models（Anthropic 风格）。
 
-/// 模型列表端点风格。两种风格的端点路径都是 <root>/v1/models
-/// （base 末尾已含 /v1 则拼 /models，否则拼 /v1/models），区别在认证头。
-enum ModelListEndpointStyle {
-    /// OpenAI 兼容：Authorization: Bearer。
-    case openAICompatible
-    /// Anthropic 风格：附加 x-api-key + anthropic-version 头。
-    case anthropic
-}
-
-/// 拉取到的模型列表与请求状态（每个编辑器持有一个实例）。
+/// 拉取到的模型列表、公开价格与请求状态（每个编辑器持有一个实例）。
+/// 一次「获取模型和价格」并行读取上游 /v1/models 与 models.dev 目录：
+/// 编辑器拿到结果后自行决定加入哪些模型，并用 `publicPrice(for:)` 回填空白价格，
+/// 不再需要「获取模型 → 匹配公开价格 → 预览 → 应用」四步。
 @MainActor
 final class ModelFetchState: ObservableObject {
     @Published private(set) var availableModels: [String] = []
     @Published private(set) var isFetching = false
     @Published private(set) var errorMessage: String?
+    /// 公开价格目录不可用时的说明（模型列表仍可正常使用）。
+    @Published private(set) var pricingErrorMessage: String?
+    /// 每次获取结束（无论成败）+1。编辑器监听它在一次获取后统一合并模型、回填价格。
+    @Published private(set) var completedRevision = 0
 
-    static func modelsURL(baseURL: String, style: ModelListEndpointStyle) -> URL? {
-        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
-        guard !trimmed.isEmpty else { return nil }
+    private var priceCatalog: ModelsDevPricingService.Catalog?
+    private var priceBaseURL: String?
+    private var priceCache: [String: ProxyConfiguration.ModelPricing?] = [:]
 
-        let path = trimmed.lowercased().hasSuffix("/v1") ? "/models" : "/v1/models"
-        return URL(string: trimmed + path)
-    }
+    var hasPriceCatalog: Bool { priceCatalog != nil }
 
     func fetch(baseURL: String, apiKey: String, style: ModelListEndpointStyle) async {
-        guard let url = Self.modelsURL(baseURL: baseURL, style: style) else { return }
+        guard UpstreamModelListClient.modelsURL(baseURL: baseURL) != nil else { return }
         guard !isFetching else { return }
 
         isFetching = true
         errorMessage = nil
-        defer { isFetching = false }
-
-        var request = URLRequest(url: url, timeoutInterval: 10)
-        if !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            if style == .anthropic {
-                request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-                request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            }
+        pricingErrorMessage = nil
+        defer {
+            isFetching = false
+            completedRevision += 1
         }
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                switch http.statusCode {
-                case 401, 403:
-                    errorMessage = L(
-                        "Authentication failed. Check the upstream API key.",
-                        "认证失败，请检查上游 API Key。"
-                    )
-                case 404:
-                    errorMessage = L(
-                        "This upstream does not expose a model list. You can still enter model names manually.",
-                        "该上游未提供模型列表，仍可手动输入模型名称。"
-                    )
-                default:
-                    errorMessage = L(
-                        "Could not read models (HTTP \(http.statusCode)).",
-                        "无法读取模型（HTTP \(http.statusCode)）。"
-                    )
-                }
-                return
-            }
+        async let modelsResult = Self.loadModels(baseURL: baseURL, apiKey: apiKey, style: style)
+        async let catalogResult = Self.loadCatalog()
+        let (models, catalog) = await (modelsResult, catalogResult)
 
-            let object = try JSONSerialization.jsonObject(with: data)
-            let models = Self.extractModelIDs(from: object)
-            availableModels = models
-            errorMessage = models.isEmpty
-                ? L(
-                    "No model names were returned. You can still enter one manually.",
-                    "上游没有返回模型名称，仍可手动输入。"
-                )
-                : nil
-        } catch {
+        switch models {
+        case .success(let names):
+            availableModels = names
+        case .failure(let error):
             errorMessage = error.localizedDescription
+        }
+
+        switch catalog {
+        case .success(let loaded):
+            priceCatalog = loaded
+            priceBaseURL = baseURL
+            priceCache = [:]
+        case .failure:
+            pricingErrorMessage = L(
+                "Public prices (models.dev) are unavailable right now; models can still be added.",
+                "暂时无法读取 models.dev 公开价格，模型仍可正常添加。"
+            )
         }
     }
 
-    private static func extractModelIDs(from object: Any) -> [String] {
-        var names: [String] = []
+    /// 某个模型的公开价格（USD）。基于本次获取时的 Base URL 优先匹配对应提供商；
+    /// 手动输入、不在上游列表里的模型同样可以命中。
+    func publicPrice(for model: String) -> ProxyConfiguration.ModelPricing? {
+        let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let priceCatalog else { return nil }
+        if let cached = priceCache[name] { return cached }
+        let price = ModelsDevPricingService.pricingMap(
+            models: [name],
+            upstreamBaseURL: priceBaseURL,
+            in: priceCatalog
+        )[name]
+        priceCache[name] = price
+        return price
+    }
 
-        func appendRows(_ rows: [[String: Any]]) {
-            names.append(contentsOf: rows.compactMap { row in
-                (row["id"] as? String) ?? (row["name"] as? String)
-            })
+    private static func loadModels(
+        baseURL: String,
+        apiKey: String,
+        style: ModelListEndpointStyle
+    ) async -> Result<[String], Error> {
+        do {
+            return .success(try await UpstreamModelListClient.fetchModelIDs(
+                baseURL: baseURL,
+                apiKey: apiKey,
+                style: style
+            ))
+        } catch {
+            return .failure(error)
         }
+    }
 
-        if let root = object as? [String: Any] {
-            if let rows = root["data"] as? [[String: Any]] {
-                appendRows(rows)
-            } else if let rows = root["models"] as? [[String: Any]] {
-                appendRows(rows)
-            } else if let values = root["models"] as? [String] {
-                names.append(contentsOf: values)
-            }
-        } else if let rows = object as? [[String: Any]] {
-            appendRows(rows)
-        } else if let values = object as? [String] {
-            names.append(contentsOf: values)
+    private static func loadCatalog() async -> Result<ModelsDevPricingService.Catalog, Error> {
+        do {
+            return .success(try await ModelsDevPricingService.catalog())
+        } catch {
+            return .failure(error)
         }
-
-        var seen = Set<String>()
-        return names
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     func filteredModels(for text: String) -> [String] {
@@ -130,6 +116,8 @@ struct ModelFetchControls: View {
     var style: ModelListEndpointStyle = .openAICompatible
     /// 上游必须配 Key 才允许拉取（本地上游如 Ollama 可置 false）。
     var requiresAPIKey = true
+    /// 获取完成后由编辑器回报的结果摘要（如「新增 3 个 · 定价 5 个」）；nil 时显示默认计数。
+    var resultSummary: String?
 
     private var disabled: Bool {
         baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -142,24 +130,45 @@ struct ModelFetchControls: View {
             Button {
                 Task { await state.fetch(baseURL: baseURL, apiKey: apiKey, style: style) }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     if state.isFetching {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: "arrow.down.circle")
+                        Image(systemName: "arrow.triangle.2.circlepath")
                     }
-                    Text(L("Fetch Models", "获取模型"))
+                    Text(L("Fetch Models & Prices", "获取模型和价格"))
                 }
                 .font(.caption.weight(.semibold))
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.teal)
+            .controlSize(.small)
             .disabled(disabled)
+            .help(L(
+                "Reads the upstream model list and models.dev public prices in one go. Blank prices are filled automatically; manual prices are never overwritten.",
+                "一次读取上游模型列表与 models.dev 公开价格。空白价格自动填入，手动价格不会被覆盖。"
+            ))
 
-            if !state.availableModels.isEmpty {
-                Text(L("\(state.availableModels.count) models available", "已获取 \(state.availableModels.count) 个模型"))
-                    .font(.caption2).foregroundStyle(.green)
-            } else if let error = state.errorMessage {
-                Text(error).font(.caption2).foregroundStyle(.red)
-            }
+            statusText
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    @ViewBuilder
+    private var statusText: some View {
+        if state.isFetching {
+            Text(L("Reading upstream…", "正在读取上游…"))
+                .font(.caption2).foregroundStyle(.secondary)
+        } else if let error = state.errorMessage {
+            Text(error).font(.caption2).foregroundStyle(.red)
+                .help(error)
+        } else if let resultSummary {
+            Text(resultSummary).font(.caption2).foregroundStyle(.green)
+                .help(state.pricingErrorMessage ?? resultSummary)
+        } else if !state.availableModels.isEmpty {
+            Text(L("\(state.availableModels.count) models available", "已获取 \(state.availableModels.count) 个模型"))
+                .font(.caption2).foregroundStyle(.green)
         }
     }
 }
@@ -342,6 +351,8 @@ struct FetchedModelAppendList: View {
     let existingModels: Set<String>
     let onAppend: (String) -> Void
     let onAppendAll: ([String]) -> Void
+    /// 可选：查询某模型的公开价格（USD），在行尾展示，添加时会一并写入。
+    var priceLookup: ((String) -> ProxyConfiguration.ModelPricing?)? = nil
 
     @State private var query = ""
     @State private var hovered: String?
@@ -441,6 +452,13 @@ struct FetchedModelAppendList: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1)))
     }
 
+    private static func priceHint(_ price: ProxyConfiguration.ModelPricing) -> String {
+        func amount(_ value: Double) -> String {
+            "$" + value.formatted(.number.precision(.fractionLength(0...3)))
+        }
+        return "\(amount(price.inputPerMillionUSD)) / \(amount(price.outputPerMillionUSD))"
+    }
+
     private func row(_ model: String) -> some View {
         let added = existingModels.contains(model)
         let isHovered = hovered == model
@@ -458,6 +476,13 @@ struct FetchedModelAppendList: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 6)
+                if let price = priceLookup?(model) {
+                    Text(Self.priceHint(price))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(L("Public price per 1M tokens (input / output)", "每百万 token 公开价（输入 / 输出）"))
+                }
                 if added {
                     Text(L("Added", "已添加"))
                         .font(.caption2)
@@ -478,5 +503,22 @@ struct FetchedModelAppendList: View {
         .onHover { hovering in
             hovered = hovering ? model : (hovered == model ? nil : hovered)
         }
+    }
+}
+
+// MARK: - Fetch Summary
+
+/// 「获取模型和价格」完成后的一句话结果。
+enum ModelFetchSummary {
+    /// 空列表（新节点）一键获取时，上游模型不多于此数就直接全部加入；
+    /// 聚合网关动辄几百个模型，超过时仍让用户在列表里挑选。
+    static let autoAddLimit = 60
+
+    static func text(added: Int, priced: Int, notAdded: Int) -> String {
+        var parts: [String] = []
+        if added > 0 { parts.append(L("\(added) added", "新增 \(added) 个")) }
+        if priced > 0 { parts.append(L("\(priced) priced", "定价 \(priced) 个")) }
+        if notAdded > 0 { parts.append(L("\(notAdded) more below", "另有 \(notAdded) 个可在下方添加")) }
+        return parts.isEmpty ? L("Up to date", "已是最新") : parts.joined(separator: " · ")
     }
 }

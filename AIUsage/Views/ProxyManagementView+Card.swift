@@ -563,6 +563,12 @@ struct ConfigurationCardView: View, Equatable {
         }
         .disabled(isBusy || connectivityState?.isTesting == true)
 
+        Button {
+            ModelAutoSyncCoordinator.shared.syncNow(.profile(config.id))
+        } label: {
+            Label(L("Update Models & Prices", "更新模型与价格"), systemImage: "arrow.down.circle")
+        }
+
         if libraryModels.count > 1 {
             Menu {
                 ForEach(modelSwitchOptions, id: \.self) { model in

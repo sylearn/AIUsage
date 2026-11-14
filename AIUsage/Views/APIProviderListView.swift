@@ -82,6 +82,7 @@ struct APIProviderListView: View {
     var body: some View {
         content
         .appFlashOverlay(flash)
+        .modelSyncFlashOverlay()
         .onChange(of: requestNew) { _, newValue in
             guard newValue else { return }
             editorContext = EditorContext(id: "new", provider: APIProvider(), initialTargets: [])

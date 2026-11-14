@@ -27,7 +27,7 @@ struct MenuBarView: View {
                 Divider()
                 controlDeck
                 Divider()
-                menuBarContent
+                quotaSection
                 costTrackingSection
                 MenuBarRecentSessionsSection { openMainWindow(section: .sessions) }
                 Divider()
@@ -186,6 +186,35 @@ struct MenuBarView: View {
     }
 
     // MARK: - Content
+
+    /// 账号额度区（可折叠，状态记住）。收起时只留标题行与「最低剩余」摘要。
+    private var quotaSection: some View {
+        VStack(spacing: 0) {
+            if !quotaProviderGroups.isEmpty {
+                MenuBarCollapsibleHeader(
+                    title: L("Account Quota", "账号额度"),
+                    isExpanded: $settings.menuBarUsageExpanded,
+                    collapsedSummary: quotaCollapsedSummary?.text,
+                    summaryColor: quotaCollapsedSummary?.color ?? .secondary
+                )
+            }
+            if settings.menuBarUsageExpanded || quotaProviderGroups.isEmpty {
+                menuBarContent
+            }
+        }
+    }
+
+    /// 收起时的摘要：可见服务里剩余额度最低的一项。
+    private var quotaCollapsedSummary: (text: String, color: Color)? {
+        let hidden = settings.hiddenSidebarSections
+        let lowest = refreshCoordinator.providers
+            .filter { !AgentVisibility.isProviderHidden($0.baseProviderId, hidden: hidden) }
+            .compactMap(\.remainingPercent)
+            .min()
+        guard let lowest else { return nil }
+        let percent = Int(lowest.rounded())
+        return (L("Lowest \(percent)% left", "最低剩余 \(percent)%"), MenuBarHelpers.quotaColor(lowest))
+    }
 
     private var menuBarContent: some View {
         Group {

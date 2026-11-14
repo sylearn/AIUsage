@@ -258,6 +258,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             hideMainWindowForSilentLaunch()
         }
 
+        // 后台自动同步各节点的上游模型与 models.dev 公开价格（到期才跑，默认每 6 小时）。
+        ModelAutoSyncCoordinator.shared.start()
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             AppState.shared.refreshAllProviders()
             // Claude Code 每次回传额度都会写快照；监听后卡片即时更新，不等全局刷新周期。

@@ -335,6 +335,13 @@ struct APIProviderCard: View {
         }
         .disabled(!isDistributed || syncPhase == .syncing)
 
+        Button {
+            ModelAutoSyncCoordinator.shared.syncNow(.provider(provider.id))
+        } label: {
+            Label(L("Update Models & Prices", "更新模型与价格"), systemImage: "arrow.down.circle")
+        }
+        .disabled(provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
         Button(action: onDuplicate) {
             Label(L("Duplicate", "创建副本"), systemImage: "plus.square.on.square")
         }

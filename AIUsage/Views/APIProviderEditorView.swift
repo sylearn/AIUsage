@@ -19,6 +19,8 @@ struct APIProviderEditorView: View {
     @State private var topPText: String
     @State private var showAdvanced = false
     @StateObject private var modelFetch = ModelFetchState()
+    /// 「快速接入」选中的服务商预设；nil = 自定义。
+    @State private var presetID: String?
     private let initialProvider: APIProvider
     private let initialTargets: Set<ProxyTarget>
     private let isNew: Bool
@@ -76,6 +78,9 @@ struct APIProviderEditorView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if isNew {
+                        EditorCard { presetQuickSetup }
+                    }
                     EditorCard(L("API Format", "接口格式")) { formatSection }
                     EditorCard(L("Basic Information", "基本信息")) { basicSection }
                     EditorCard { modelsSection }
@@ -94,6 +99,15 @@ struct APIProviderEditorView: View {
                minHeight: 480, idealHeight: 660, maxHeight: 680)
         .onChange(of: draft.format) { _, newFormat in
             selectedTargets = selectedTargets.filter { $0.supports(newFormat) }
+            // 预设地址按接口格式切换（Anthropic 入口不带 /v1）；用户改过的地址不动。
+            if let preset = ProviderPresetCatalog.preset(id: presetID), preset.isEndpoint(draft.baseURL) {
+                draft.baseURL = preset.baseURL(for: newFormat)
+            }
+        }
+        .onChange(of: draft.baseURL) { _, newValue in
+            if let preset = ProviderPresetCatalog.preset(id: presetID), !preset.isEndpoint(newValue) {
+                presetID = nil
+            }
         }
         .confirmationDialog(
             L("Discard changes?", "放弃更改？"),
@@ -192,6 +206,34 @@ struct APIProviderEditorView: View {
         )
     }
 
+    // MARK: - Quick Setup
+
+    private var presetQuickSetup: some View {
+        ProviderPresetQuickSetup(
+            selectedID: $presetID,
+            apiKey: $draft.apiKey,
+            endpointSummary: draft.baseURL.nilIfBlank.map { "\($0) · \(draft.format.displayName)" },
+            fetch: .init(state: modelFetch, baseURL: draft.baseURL, style: fetchStyle),
+            onSelect: applyPreset
+        )
+    }
+
+    private func applyPreset(_ preset: ProviderPreset?) {
+        guard let preset else {
+            // 回到自定义：只清掉预设自动填的值，用户自己写的保留。
+            if ProviderPresetCatalog.all.contains(where: { $0.isEndpoint(draft.baseURL) }) { draft.baseURL = "" }
+            if ProviderPresetCatalog.isPresetName(draft.name) { draft.name = "" }
+            return
+        }
+        if !preset.supports(draft.format) {
+            draft.format = .openAIChatCompletions
+        }
+        draft.baseURL = preset.baseURL(for: draft.format)
+        if draft.name.trimmingCharacters(in: .whitespaces).isEmpty || ProviderPresetCatalog.isPresetName(draft.name) {
+            draft.name = preset.name
+        }
+    }
+
     private var basicSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -217,19 +259,13 @@ struct APIProviderEditorView: View {
 
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ModelFetchControls(
-                state: modelFetch,
-                baseURL: draft.baseURL,
-                apiKey: draft.apiKey,
-                style: fetchStyle,
-                requiresAPIKey: false
-            )
-
             ProviderModelLibraryEditor(
                 library: $library,
                 currency: $currency,
                 modelFetch: modelFetch,
-                upstreamBaseURL: draft.baseURL
+                upstreamBaseURL: draft.baseURL,
+                apiKey: draft.apiKey,
+                fetchStyle: fetchStyle
             )
 
             VStack(alignment: .leading, spacing: 4) {
