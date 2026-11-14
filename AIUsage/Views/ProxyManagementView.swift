@@ -84,6 +84,11 @@ struct ProxyManagementView: View {
     }
 
     var body: some View {
+        bodyContent
+            .modelSyncFlashOverlay()
+    }
+
+    private var bodyContent: some View {
         VStack(spacing: 0) {
             // Codex 专属：系统代理会拦截 codex 发往本地的请求导致 502，开启时顶部提示+一键修复。
             if family.isCodex {

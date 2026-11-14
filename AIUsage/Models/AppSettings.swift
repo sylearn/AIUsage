@@ -154,6 +154,13 @@ enum DefaultsKey {
     static let sessionResumeTerminal = "sessionResumeTerminal"
     /// 菜单栏「最近会话」是否展开。缺省=true。
     static let menuBarRecentSessionsExpanded = "menuBarRecentSessionsExpanded"
+    /// 菜单栏「费用」「用量」区块是否展开。缺省=true。
+    static let menuBarCostExpanded = "menuBarCostExpanded"
+    static let menuBarUsageExpanded = "menuBarUsageExpanded"
+    /// 后台自动同步各节点的上游模型与 models.dev 公开价格。缺省=true。
+    static let modelAutoSyncEnabled = "modelAutoSyncEnabled"
+    /// 侧边栏左下角的合作服务商推荐位。缺省=true，可在推荐位右键或设置里关闭。
+    static let showSponsorSpot = "showSponsorSpot"
     /// 会话中心全文搜索：在本机缓存目录建正文索引，搜索也覆盖回复与工具调用。缺省=false（用户确认后开启）。
     static let sessionFullTextSearch = "sessionFullTextSearch"
     /// 主机端：是否把本机额度快照只读共享给远程模式的其它 AIUsage。缺省=false。
@@ -328,6 +335,21 @@ final class AppSettings: ObservableObject {
     @Published var menuBarRecentSessionsExpanded: Bool =
         UserDefaults.standard.object(forKey: DefaultsKey.menuBarRecentSessionsExpanded) as? Bool ?? true
 
+    @Published var menuBarCostExpanded: Bool =
+        UserDefaults.standard.object(forKey: DefaultsKey.menuBarCostExpanded) as? Bool ?? true
+
+    @Published var menuBarUsageExpanded: Bool =
+        UserDefaults.standard.object(forKey: DefaultsKey.menuBarUsageExpanded) as? Bool ?? true
+
+    /// 后台自动同步模型与公开价格（见 ModelAutoSyncCoordinator）。只追加上游新上架的模型、
+    /// 只填空白价格或刷新来源为 models.dev 的价格；手动价格与已删除的模型不受影响。
+    @Published var modelAutoSyncEnabled: Bool =
+        UserDefaults.standard.object(forKey: DefaultsKey.modelAutoSyncEnabled) as? Bool ?? true
+
+    /// 侧边栏合作服务商推荐位（见 SidebarSponsorSpot）。
+    @Published var showSponsorSpot: Bool =
+        UserDefaults.standard.object(forKey: DefaultsKey.showSponsorSpot) as? Bool ?? true
+
     /// 会话中心全文搜索；关闭时删除索引（见 SessionCenterStore）。
     @Published var sessionFullTextSearch: Bool =
         UserDefaults.standard.bool(forKey: DefaultsKey.sessionFullTextSearch)
@@ -422,6 +444,10 @@ final class AppSettings: ObservableObject {
         $sidebarProxiesGroupExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sidebarProxiesGroupExpanded) }.store(in: &cancellables)
         $sessionResumeTerminal.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sessionResumeTerminal) }.store(in: &cancellables)
         $menuBarRecentSessionsExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.menuBarRecentSessionsExpanded) }.store(in: &cancellables)
+        $menuBarCostExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.menuBarCostExpanded) }.store(in: &cancellables)
+        $menuBarUsageExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.menuBarUsageExpanded) }.store(in: &cancellables)
+        $modelAutoSyncEnabled.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.modelAutoSyncEnabled) }.store(in: &cancellables)
+        $showSponsorSpot.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.showSponsorSpot) }.store(in: &cancellables)
         $sessionFullTextSearch.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sessionFullTextSearch) }.store(in: &cancellables)
     }
 

@@ -18,6 +18,9 @@ struct OpenCodeNodeEditorView: View {
     /// 已展开 modalities 配置面板的模型行 id 集合（issue #24，每模型独立配置模态）。
     @State private var expandedModalityRows: Set<UUID> = []
     @StateObject private var modelFetch = ModelFetchState()
+    @State private var fetchSummary: String?
+    /// 「快速接入」选中的服务商预设；nil = 自定义。
+    @State private var presetID: String?
     @State private var connectivity: ConnectivityResult = .idle
     /// 生成参数的文本镜像：temperature/topP/penalty 的 0 是合法值，用文本输入避免 0 哨兵歧义，
     /// 解析为可选 Double（空/非法 = nil）。maxOutputTokens 直接绑定 node（Int，0 = 不写）。
@@ -117,6 +120,9 @@ struct OpenCodeNodeEditorView: View {
                             }
                         }
                     }
+                    if isNew {
+                        EditorCard { presetQuickSetup }
+                    }
                     EditorCard(L("Interface Type", "接口类型")) { interfaceSection }
                     EditorCard(L("Basic Information", "基本信息")) { basicSection }
                     EditorCard(L("Local Proxy", "本地代理")) { proxySection }
@@ -137,6 +143,17 @@ struct OpenCodeNodeEditorView: View {
                minHeight: 480, idealHeight: 660, maxHeight: 680)
         .onChange(of: node.pricingCurrency) { oldCurrency, newCurrency in
             convertPrices(from: oldCurrency, to: newCurrency)
+        }
+        // 预设地址跟随协议切换：OpenCode 的 Anthropic SDK 需要带 /v1 的入口。
+        .onChange(of: node.protocolType) { _, newProtocol in
+            if let preset = ProviderPresetCatalog.preset(id: presetID), preset.isEndpoint(node.baseURL) {
+                node.baseURL = preset.openCodeBaseURL(for: newProtocol)
+            }
+        }
+        .onChange(of: node.baseURL) { _, newValue in
+            if let preset = ProviderPresetCatalog.preset(id: presetID), !preset.isEndpoint(newValue) {
+                presetID = nil
+            }
         }
     }
 
@@ -317,6 +334,41 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
+    // MARK: - Quick Setup
+
+    private var presetQuickSetup: some View {
+        ProviderPresetQuickSetup(
+            selectedID: $presetID,
+            apiKey: $node.apiKey,
+            endpointSummary: node.baseURL.nilIfBlank.map { "\($0) · \(node.protocolType.displayName)" },
+            fetch: .init(
+                state: modelFetch,
+                baseURL: node.baseURL,
+                style: node.protocolType == .anthropic ? .anthropic : .openAICompatible,
+                summary: fetchSummary
+            ),
+            onSelect: applyPreset
+        )
+    }
+
+    private func applyPreset(_ preset: ProviderPreset?) {
+        guard let preset else {
+            if ProviderPresetCatalog.all.contains(where: { $0.isEndpoint(node.baseURL) }) { node.baseURL = "" }
+            if ProviderPresetCatalog.isPresetName(node.name) { node.name = "" }
+            return
+        }
+        if node.protocolType == .anthropic, !preset.supports(.anthropic) {
+            node.protocolType = .openAICompatible
+        }
+        if node.protocolType == .openAIResponses, !preset.supportsResponses {
+            node.protocolType = .openAICompatible
+        }
+        node.baseURL = preset.openCodeBaseURL(for: node.protocolType)
+        if node.name.trimmingCharacters(in: .whitespaces).isEmpty || ProviderPresetCatalog.isPresetName(node.name) {
+            node.name = preset.name
+        }
+    }
+
     // MARK: - Models（行式：单选默认模型 + 每模型独立定价）
 
     private var showsPriceColumns: Bool { node.pricingCurrency != .none }
@@ -336,18 +388,16 @@ struct OpenCodeNodeEditorView: View {
             }
 
             HStack(spacing: 10) {
-                PublicModelPricingImportControl(
-                    models: modelRows.map(\.entry.id),
-                    upstreamBaseURL: node.baseURL,
-                    displayCurrency: publicPriceDisplayCurrency,
-                    applyNote: node.pricingCurrency == .none
-                        ? L(
-                            "Applying matches will enable USD pricing for this node.",
-                            "应用匹配后会为此节点启用 USD 计价。"
-                        )
-                        : nil,
-                    onApply: applyPublicPrices
+                ModelFetchControls(
+                    state: modelFetch,
+                    baseURL: node.baseURL,
+                    apiKey: node.apiKey,
+                    style: node.protocolType == .anthropic ? .anthropic : .openAICompatible,
+                    requiresAPIKey: false,
+                    resultSummary: fetchSummary
                 )
+
+                Spacer(minLength: 8)
 
                 if showsPriceColumns {
                     Button {
@@ -365,29 +415,23 @@ struct OpenCodeNodeEditorView: View {
                         "只填充空白缓存价格：缓存写入按输入价的 1.25 倍，缓存读取按 0.1 倍。"
                     ))
                 }
-
-                Spacer()
             }
-
-            ModelFetchControls(
-                state: modelFetch,
-                baseURL: node.baseURL,
-                apiKey: node.apiKey,
-                style: node.protocolType == .anthropic ? .anthropic : .openAICompatible,
-                requiresAPIKey: false
-            )
 
             FetchedModelAppendList(
                 state: modelFetch,
                 existingModels: Set(parsedModels),
                 onAppend: { appendModels([$0]) },
-                onAppendAll: { appendModels($0) }
+                onAppendAll: { appendModels($0) },
+                priceLookup: { modelFetch.publicPrice(for: $0) }
             )
 
             if !modelRows.isEmpty {
                 modelColumnHeaders
-                ForEach($modelRows) { $row in
-                    modelRowView($row)
+                // 懒加载：模型多时只构建可见行。
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach($modelRows) { $row in
+                        modelRowView($row)
+                    }
                 }
                 // 不在每次按键时校验默认模型：编辑模型 ID 的中途态会被误判为失配而跳走单选。
                 // 默认模型在增行(appendModels)、删行(modelRowView 删除按钮)与保存(save)时已兜底校验。
@@ -413,6 +457,9 @@ struct OpenCodeNodeEditorView: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
+        }
+        .onChange(of: modelFetch.completedRevision) { _, _ in
+            applyFetchResult()
         }
     }
 
@@ -648,23 +695,47 @@ struct OpenCodeNodeEditorView: View {
         )
     }
 
-    private func applyPublicPrices(_ matches: [PublicModelPriceMatch]) {
-        if node.pricingCurrency == .none {
+    /// 回填公开价格：只填空白价格、刷新来源为 models.dev 的价格；手动价格不动。
+    /// 填入任何价格且节点原本「不计价」时，切到 USD 计价（与旧的「应用匹配」一致）。
+    @discardableResult
+    private func applyPublicPricesToRows() -> Int {
+        guard modelFetch.hasPriceCatalog else { return 0 }
+        var changed = 0
+        for index in modelRows.indices {
+            let entry = modelRows[index].entry
+            guard let updated = PublicPriceUpdate.updatedEntry(
+                entry,
+                nodeCurrency: node.pricingCurrency,
+                candidate: modelFetch.publicPrice(for: entry.id)
+            ) else { continue }
+            modelRows[index].entry = updated
+            changed += 1
+        }
+        if changed > 0, node.pricingCurrency == .none {
             node.pricingCurrency = .usd
         }
-        let matchesByModel = Dictionary(uniqueKeysWithValues: matches.map { ($0.model, $0.pricing) })
-        for index in modelRows.indices {
-            let model = modelRows[index].entry.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard
-                !modelRows[index].entry.hasPricing,
-                let imported = matchesByModel[model]
-            else { continue }
-            modelRows[index].entry.priceInputPerMillion = imported.inputPerMillion
-            modelRows[index].entry.priceOutputPerMillion = imported.outputPerMillion
-            modelRows[index].entry.priceCacheWritePerMillion = imported.cacheCreatePerMillion
-            modelRows[index].entry.priceCacheReadPerMillion = imported.cacheReadPerMillion
-            modelRows[index].entry.pricingSource = imported.source
+        return changed
+    }
+
+    /// 一次「获取模型和价格」完成后：空列表且模型不多时直接全部加入，然后回填价格。
+    private func applyFetchResult() {
+        let fetched = modelFetch.availableModels
+        var added = 0
+        if parsedModels.isEmpty, !fetched.isEmpty, fetched.count <= ModelFetchSummary.autoAddLimit {
+            modelRows.removeAll { $0.entry.id.trimmingCharacters(in: .whitespaces).isEmpty }
+            added = appendModels(fetched, applyPrices: false)
         }
+        let priced = applyPublicPricesToRows()
+        guard modelFetch.errorMessage == nil || priced > 0 else {
+            fetchSummary = nil
+            return
+        }
+        let existing = Set(parsedModels)
+        fetchSummary = ModelFetchSummary.text(
+            added: added,
+            priced: priced,
+            notAdded: fetched.filter { !existing.contains($0) }.count
+        )
     }
 
     private func convertPrices(
@@ -888,13 +959,17 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
-    /// 把获取到的模型追加为新行（跳过已有项，保持原有行不动）。
-    private func appendModels(_ models: [String]) {
+    /// 把获取到的模型追加为新行（跳过已有项，保持原有行不动），默认立即带上公开价格。
+    @discardableResult
+    private func appendModels(_ models: [String], applyPrices: Bool = true) -> Int {
         let existing = Set(parsedModels)
-        let additions = models.filter { !existing.contains($0) }
-        guard !additions.isEmpty else { return }
+        var seen = Set<String>()
+        let additions = models.filter { !existing.contains($0) && seen.insert($0).inserted }
+        guard !additions.isEmpty else { return 0 }
         modelRows.append(contentsOf: additions.map { ModelRow(entry: OpenCodeModelEntry(id: $0)) })
         ensureDefaultModelValid()
+        if applyPrices { applyPublicPricesToRows() }
+        return additions.count
     }
 
     private func save() {

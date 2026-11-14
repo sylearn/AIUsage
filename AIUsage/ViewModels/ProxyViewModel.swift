@@ -385,6 +385,47 @@ class ProxyViewModel: ObservableObject {
         return true
     }
 
+    /// 切换节点默认模型（节点卡片与菜单栏共用）。Codex 单模型即 bigModel（写入 config.toml 的 model）。
+    /// 走 `updateProfile`：已接入的节点会按新模型重写 CLI 配置。
+    func switchDefaultModel(nodeID: String, to model: String) async {
+        let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, var profile = profileStore.profile(for: nodeID) else { return }
+        if profile.metadata.nodeType.isCodex {
+            guard profile.metadata.proxy.modelMapping.bigModel.name != normalized else { return }
+            profile.metadata.proxy.modelMapping.bigModel.name = normalized
+        } else {
+            guard profile.metadata.proxy.defaultModel != normalized else { return }
+        }
+        profile.metadata.proxy.defaultModel = normalized
+        profile.metadata.proxy.modelCatalog.mergeModels([normalized])
+        profile.syncEnvFromProxy()
+        await updateProfile(profile)
+    }
+
+    /// 整体替换某节点的模型目录（后台模型 / 公开价格同步专用）。
+    ///
+    /// 与 `setSupports1M` 同理不走 `updateProfile`：那条路会停掉再重建节点运行时，正在进行的
+    /// 请求会被打断；而目录与价格只影响可选模型和费用估算，运行中的进程不需要重启。
+    /// 价格变化立即对新请求生效（费用按内存中的 `configurations` 计算），并回填历史未定价日志。
+    @discardableResult
+    func applyModelCatalogUpdate(nodeID: String, catalog: ProxyConfiguration.ModelCatalog) -> Bool {
+        guard let index = configurations.firstIndex(where: { $0.id == nodeID }),
+              var profile = profileStore.profile(for: nodeID) else { return false }
+        guard profile.metadata.proxy.modelCatalog != catalog else { return true }
+
+        let previous = configurations[index].modelCatalog
+        profile.metadata.proxy.modelCatalog = catalog
+        configurations[index].modelCatalog = catalog
+        guard profileStore.save(profile) else {
+            configurations[index].modelCatalog = previous
+            return false
+        }
+        if previous.pricingOverrides != catalog.pricingOverrides {
+            recalculateCosts(for: nodeID)
+        }
+        return true
+    }
+
     func saveActivatedId() {
         if let id = activatedConfigId {
             UserDefaults.standard.set(id, forKey: DefaultsKey.proxyActivatedConfigId)

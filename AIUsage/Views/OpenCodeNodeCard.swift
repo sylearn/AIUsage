@@ -457,6 +457,13 @@ struct OpenCodeNodeCard: View, Equatable {
         }
         .disabled(isBusy || connectivityState?.isTesting == true)
 
+        Button {
+            ModelAutoSyncCoordinator.shared.syncNow(.openCode(node.id))
+        } label: {
+            Label(L("Update Models & Prices", "更新模型与价格"), systemImage: "arrow.down.circle")
+        }
+        .disabled(node.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
         if node.models.count > 1 {
             Menu {
                 ForEach(node.models, id: \.self) { model in

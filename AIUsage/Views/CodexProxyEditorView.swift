@@ -15,6 +15,9 @@ struct CodexProxyEditorView: View {
     @State private var profile: NodeProfile
     @State private var isNew: Bool
     @StateObject private var modelFetch = ModelFetchState()
+    @State private var fetchSummary: String?
+    /// 「快速接入」选中的服务商预设；nil = 自定义。
+    @State private var presetID: String?
     @State private var pricingCurrency: ProxyConfiguration.PricingCurrency
     @State private var isPricingEditorPresented = false
     @State private var extraTOMLCheck: TOMLCheckResult = .ok
@@ -68,6 +71,9 @@ struct CodexProxyEditorView: View {
                         }
                     }
                     introBanner
+                    if isNew {
+                        presetQuickSetup
+                    }
                     basicSection
                     networkSection
                     upstreamSection
@@ -88,8 +94,23 @@ struct CodexProxyEditorView: View {
         .sheet(isPresented: $isPricingEditorPresented) {
             pricingRulesSheet
         }
-        .onChange(of: modelFetch.availableModels) { _, models in
-            profile.metadata.proxy.modelCatalog.mergeModels(models)
+        .onChange(of: profile.metadata.proxy.upstreamBaseURL) { _, newValue in
+            if let preset = ProviderPresetCatalog.preset(id: presetID), !preset.isEndpoint(newValue) {
+                presetID = nil
+            }
+        }
+        .onChange(of: modelFetch.completedRevision) { _, _ in
+            let before = Set(profile.metadata.proxy.modelCatalog.models)
+            if !modelFetch.availableModels.isEmpty {
+                profile.metadata.proxy.modelCatalog.mergeModels(modelFetch.availableModels)
+            }
+            let added = profile.metadata.proxy.modelCatalog.models.filter { !before.contains($0) }.count
+            let priced = modelFetch.hasPriceCatalog
+                ? profile.metadata.proxy.modelCatalog.applyPublicPrices { modelFetch.publicPrice(for: $0) }
+                : 0
+            fetchSummary = (modelFetch.errorMessage == nil || priced > 0)
+                ? ModelFetchSummary.text(added: added, priced: priced, notAdded: 0)
+                : nil
         }
     }
 
@@ -146,6 +167,43 @@ struct CodexProxyEditorView: View {
     }
 
     // MARK: - Basic
+
+    // MARK: - Quick Setup
+
+    /// Codex 上游只说 Responses，只列出支持 Responses 的服务商。
+    private var presetQuickSetup: some View {
+        ProviderPresetQuickSetup(
+            selectedID: $presetID,
+            apiKey: $profile.metadata.proxy.upstreamAPIKey,
+            presets: ProviderPresetCatalog.all.filter(\.supportsResponses),
+            endpointSummary: profile.metadata.proxy.upstreamBaseURL.nilIfBlank.map { "\($0) · OpenAI Responses" },
+            fetch: .init(
+                state: modelFetch,
+                baseURL: profile.metadata.proxy.normalizedUpstreamBaseURL,
+                style: .openAICompatible,
+                summary: fetchSummary
+            ),
+            onSelect: applyPreset
+        )
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(AppSurface.card(colorScheme)))
+    }
+
+    private func applyPreset(_ preset: ProviderPreset?) {
+        guard let preset else {
+            if ProviderPresetCatalog.all.contains(where: { $0.isEndpoint(profile.metadata.proxy.upstreamBaseURL) }) {
+                profile.metadata.proxy.upstreamBaseURL = ""
+            }
+            if ProviderPresetCatalog.isPresetName(profile.metadata.name) { profile.metadata.name = "" }
+            return
+        }
+        profile.metadata.proxy.upstreamBaseURL = preset.baseURL(for: .openAIResponses)
+        if profile.metadata.name.trimmingCharacters(in: .whitespaces).isEmpty
+            || ProviderPresetCatalog.isPresetName(profile.metadata.name) {
+            profile.metadata.name = preset.name
+        }
+    }
 
     private var basicSection: some View {
         sectionCard(title: L("Basic Information", "基本信息")) {
@@ -234,7 +292,8 @@ struct CodexProxyEditorView: View {
                 state: modelFetch,
                 baseURL: profile.metadata.proxy.normalizedUpstreamBaseURL,
                 apiKey: profile.metadata.proxy.upstreamAPIKey,
-                style: .openAICompatible
+                style: .openAICompatible,
+                resultSummary: fetchSummary
             )
         }
     }

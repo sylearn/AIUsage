@@ -23,6 +23,27 @@ struct MenuBarTrackPanelSection: Identifiable {
     let rows: [MenuBarTrackPanelRow]
 }
 
+/// 面板底部的「模型」区：当前生效节点的可选模型。
+/// - 单模型轨（Codex / OpenCode）：`routes` 为空，直接切换 `current`。
+/// - Claude Code：按「默认 / Opus / Sonnet / Haiku」四条路由分别覆盖，`routes` 给出各路由当前模型。
+struct MenuBarModelPicker {
+    struct Route: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let current: String
+    }
+
+    /// 模型所属节点名（标题里提示「改的是哪个节点」）。
+    let nodeName: String
+    let models: [String]
+    var routes: [Route] = []
+    var current: String? = nil
+    /// 生效方式说明，如「热切换」「新会话生效」。
+    var note: String? = nil
+    /// (路由 id，单模型轨为 nil；模型名)
+    let onSelect: (_ routeID: String?, _ model: String) -> Void
+}
+
 struct MenuBarTrackPanel: View {
     let title: String
     let brandAsset: String
@@ -39,6 +60,12 @@ struct MenuBarTrackPanel: View {
     let onEnableGlobal: () -> Void
     /// 停用全局代理。
     let onDisableGlobal: () -> Void
+    /// 当前生效节点的模型选择；nil = 无生效节点或只有一个模型。
+    var modelPicker: MenuBarModelPicker? = nil
+
+    @State private var isModelListExpanded = false
+    @State private var selectedRouteID: String?
+    @State private var modelQuery = ""
 
     private var isGlobal: Bool { manager.isEnabled }
 
@@ -81,9 +108,193 @@ struct MenuBarTrackPanel: View {
                 }
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 300)
+            // 有模型区时节点列表让出一些高度，整个面板不至于超出菜单栏弹窗。
+            .frame(maxHeight: modelPicker == nil ? 300 : 210)
+            if let modelPicker {
+                Divider()
+                modelSection(modelPicker)
+            }
             footer
         }
+    }
+
+    // MARK: - Model Section
+
+    private func activeRoute(in picker: MenuBarModelPicker) -> MenuBarModelPicker.Route? {
+        picker.routes.first { $0.id == selectedRouteID } ?? picker.routes.first
+    }
+
+    private func currentModel(in picker: MenuBarModelPicker) -> String? {
+        activeRoute(in: picker)?.current ?? picker.current
+    }
+
+    @ViewBuilder
+    private func modelSection(_ picker: MenuBarModelPicker) -> some View {
+        let current = currentModel(in: picker)
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) { isModelListExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent)
+                    Text(L("Model", "模型"))
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(picker.nodeName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 6)
+                    Text(current?.nilIfBlank ?? L("Not set", "未设置"))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(current?.nilIfBlank == nil ? Color.secondary : accent)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isModelListExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(current ?? "")
+
+            if !picker.routes.isEmpty {
+                routeChips(picker)
+            }
+
+            if isModelListExpanded {
+                modelList(picker, current: current)
+            }
+
+            if let note = picker.note {
+                Text(note)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .disabled(manager.isBusy)
+    }
+
+    /// Claude Code 的四条路由：点选决定下方列表改哪一条，胶囊里直接显示该路由当前模型。
+    private func routeChips(_ picker: MenuBarModelPicker) -> some View {
+        let selected = activeRoute(in: picker)?.id
+        return HStack(spacing: 4) {
+            ForEach(picker.routes) { route in
+                let isSelected = route.id == selected
+                Button {
+                    selectedRouteID = route.id
+                    withAnimation(.easeInOut(duration: 0.16)) { isModelListExpanded = true }
+                } label: {
+                    VStack(spacing: 1) {
+                        Text(route.title)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(isSelected ? accent : .secondary)
+                        Text(Self.shortModelName(route.current))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(isSelected ? .primary : .tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isSelected ? accent.opacity(0.14) : Color.primary.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(isSelected ? accent.opacity(0.5) : Color.clear, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(route.current)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelList(_ picker: MenuBarModelPicker, current: String?) -> some View {
+        let query = modelQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let models = query.isEmpty
+            ? picker.models
+            : picker.models.filter { $0.localizedCaseInsensitiveContains(query) }
+        VStack(alignment: .leading, spacing: 4) {
+            if picker.models.count > 8 {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                    TextField(L("Filter models", "筛选模型"), text: $modelQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(models, id: \.self) { model in
+                        modelRow(model, isCurrent: model == current) {
+                            picker.onSelect(activeRoute(in: picker)?.id, model)
+                            withAnimation(.easeInOut(duration: 0.16)) { isModelListExpanded = false }
+                            modelQuery = ""
+                        }
+                    }
+                    if models.isEmpty {
+                        Text(L("No matching models", "没有匹配的模型"))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 6)
+                    }
+                }
+            }
+            .frame(maxHeight: 156)
+        }
+    }
+
+    private func modelRow(_ model: String, isCurrent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: isCurrent ? "checkmark" : "circle")
+                    .font(.system(size: isCurrent ? 9.5 : 6, weight: .bold))
+                    .foregroundStyle(isCurrent ? accent : Color.secondary.opacity(0.4))
+                    .frame(width: 12)
+                Text(model)
+                    .font(.system(size: 11, weight: isCurrent ? .semibold : .regular, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isCurrent ? accent.opacity(0.12) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 路由胶囊里放不下完整模型名：去掉常见厂商前缀与日期后缀。
+    private static func shortModelName(_ model: String) -> String {
+        guard let trimmed = model.nilIfBlank else { return "—" }
+        var name = trimmed.split(separator: "/").last.map(String.init) ?? trimmed
+        for prefix in ["claude-", "gpt-"] where name.hasPrefix(prefix) && name.count > prefix.count + 3 {
+            name.removeFirst(prefix.count)
+        }
+        if let range = name.range(of: #"-\d{8}$"#, options: .regularExpression) {
+            name.removeSubrange(range)
+        }
+        return name
     }
 
     private var header: some View {

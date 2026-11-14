@@ -97,6 +97,55 @@ final class APIProviderDistributor {
         }
     }
 
+    // MARK: - Background catalog propagation
+
+    /// 后台模型 / 价格同步专用：把主配置的模型目录推到链接节点，但不重建 Claude / Codex 运行时
+    /// （`syncFromMaster` 会走 `updateProfile` 停启节点，正在进行的请求会被打断）。
+    /// - Claude / Codex：只替换模型列表，节点本地费用规则与 1M 声明按原规则保留；
+    /// - OpenCode：模型与价格条目跟随主配置（保留本地 modalities），需要重写 opencode.json；
+    /// - CPA：仅在模型名单变化时更新上游池。
+    /// 已局部覆盖模型字段的链接节点不受影响。
+    func propagateCatalog(from provider: APIProvider, modelNamesChanged: Bool) async {
+        let providerNames = ProxyConfiguration.ModelCatalog(mappedModels: provider.models).models
+        let nameSet = Set(providerNames)
+
+        for child in [codexChild(for: provider.id), claudeChild(for: provider.id)].compactMap({ $0 }) {
+            guard !(child.metadata.overriddenKeys?.contains(APIProviderSharedKey.models) ?? false) else { continue }
+            let local = child.metadata.proxy.modelCatalog
+            let updated = ProxyConfiguration.ModelCatalog(
+                models: providerNames,
+                pricingOverrides: local.pricingOverrides.filter { nameSet.contains($0.key) },
+                supports1MModels: local.supports1MModels.filter(nameSet.contains)
+            )
+            if updated != local {
+                proxyVM.applyModelCatalogUpdate(nodeID: child.id, catalog: updated)
+            }
+        }
+
+        if let child = openCodeChild(for: provider.id),
+           !(child.overriddenKeys?.contains(APIProviderSharedKey.models) ?? false) {
+            let previousByID = Dictionary(child.modelEntries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var updated = child
+            updated.modelEntries = Self.openCodeEntries(from: provider.models).map { entry in
+                var merged = entry
+                if let previous = previousByID[entry.id] {
+                    merged.inputModalities = previous.inputModalities
+                    merged.outputModalities = previous.outputModalities
+                }
+                return merged
+            }
+            updated.pricingCurrency = updated.modelEntries.contains { $0.hasPricing } ? .usd : child.pricingCurrency
+            if updated != child {
+                openCodeStore.upsert(updated)
+            }
+        }
+
+        if modelNamesChanged, cpaLinks.hasLink(for: provider.id),
+           APIProviderCPALoopGuard.blockReason(for: provider) == nil {
+            await upsertCPAChild(provider)
+        }
+    }
+
     // MARK: - Per-target upsert
 
     private func upsertChild(_ provider: APIProvider, target: ProxyTarget) async {

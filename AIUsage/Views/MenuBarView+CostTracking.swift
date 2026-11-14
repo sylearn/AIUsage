@@ -16,24 +16,40 @@ extension MenuBarView {
     var costTrackingSection: some View {
         let rows = costSourceRows
         if !rows.isEmpty {
+            let expanded = AppSettings.shared.menuBarCostExpanded
             Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "creditcard.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    Text(L("Cost & Usage", "费用 · 用量"))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 0) {
+                MenuBarCollapsibleHeader(
+                    title: L("Cost & Usage", "费用 · 用量"),
+                    isExpanded: Binding(
+                        get: { AppSettings.shared.menuBarCostExpanded },
+                        set: { AppSettings.shared.menuBarCostExpanded = $0 }
+                    ),
+                    collapsedSummary: costCollapsedSummary(rows),
+                    summaryColor: Color(red: 0.96, green: 0.55, blue: 0.18)
+                )
 
-                ForEach(rows) { row in
-                    costSourceRow(row)
+                if expanded {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(rows) { row in
+                            costSourceRow(row)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
         }
+    }
+
+    /// 收起时的摘要：各工具今日 / 本月费用合计。
+    private func costCollapsedSummary(_ rows: [CostSourceRow]) -> String {
+        let today = rows.reduce(0) { $0 + ($1.summary.today?.usd ?? 0) }
+        let month = rows.reduce(0) { $0 + ($1.summary.month?.usd ?? 0) }
+        return L(
+            "Today \(formatCostCompact(today)) · Month \(formatCostCompact(month))",
+            "今日 \(formatCostCompact(today)) · 本月 \(formatCostCompact(month))"
+        )
     }
 
     /// 一个本地 cost 工具的费用/用量行（数据驱动，新增工具时只需补 descriptor）。

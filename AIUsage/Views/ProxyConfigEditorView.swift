@@ -95,6 +95,9 @@ struct ProxyConfigEditorView: View {
     @State private var isNew: Bool
     @State var selectedTab: EditorTab = .proxy
     @StateObject private var modelFetch = ModelFetchState()
+    @State private var fetchSummary: String?
+    /// 「快速接入」选中的服务商预设；nil = 自定义。
+    @State private var presetID: String?
     @State var jsonText: String = ""
     @State var jsonError: String?
     @State var finalJSONText: String = ""
@@ -177,8 +180,13 @@ struct ProxyConfigEditorView: View {
         } message: {
             Text(deletionError ?? "")
         }
-        .onChange(of: modelFetch.availableModels) { _, models in
-            mergeFetchedModelsIntoCatalog(models)
+        .onChange(of: modelFetch.completedRevision) { _, _ in
+            applyFetchResult()
+        }
+        .onChange(of: presetEndpointValue) { _, newValue in
+            if let preset = ProviderPresetCatalog.preset(id: presetID), !preset.isEndpoint(newValue) {
+                presetID = nil
+            }
         }
     }
 
@@ -335,6 +343,9 @@ struct ProxyConfigEditorView: View {
     @ViewBuilder private var sectionContent: some View {
         switch selectedSection {
         case .identity:
+            if isNew {
+                EditorCard { presetQuickSetup }
+            }
             nodeTypeSection
             basicSection
         case .connection:
@@ -488,9 +499,89 @@ struct ProxyConfigEditorView: View {
                         break
                     }
                 }
+                // 选了快速接入预设时，地址跟随接口类型同步切换（Anthropic 直连用不带 /v1 的入口）。
+                // 放在 setter 里同步完成，避免与「地址被改动 → 取消预设」的 onChange 先后竞争。
+                if oldType != profile.metadata.nodeType {
+                    syncPresetEndpoint()
+                }
                 profile.syncEnvFromProxy()
             }
         )
+    }
+
+    // MARK: - Quick Setup
+
+    private var presetQuickSetup: some View {
+        let isAnthropic = profile.metadata.nodeType == .anthropicDirect
+        return ProviderPresetQuickSetup(
+            selectedID: $presetID,
+            apiKey: isAnthropic
+                ? $profile.metadata.proxy.anthropicAPIKey
+                : $profile.metadata.proxy.upstreamAPIKey,
+            endpointSummary: presetEndpointValue.nilIfBlank.map {
+                "\($0) · \(isAnthropic ? "Anthropic" : profile.metadata.proxy.openAIUpstreamAPI == .responses ? "OpenAI Responses" : "OpenAI Chat")"
+            },
+            fetch: .init(
+                state: modelFetch,
+                baseURL: isAnthropic
+                    ? profile.metadata.proxy.anthropicBaseURL
+                    : profile.metadata.proxy.normalizedUpstreamBaseURL,
+                style: isAnthropic ? .anthropic : .openAICompatible,
+                summary: fetchSummary
+            ),
+            onSelect: applyPreset
+        )
+    }
+
+    /// 当前接口类型实际使用的上游地址。
+    private var presetEndpointValue: String {
+        profile.metadata.nodeType == .anthropicDirect
+            ? profile.metadata.proxy.anthropicBaseURL
+            : profile.metadata.proxy.upstreamBaseURL
+    }
+
+    private func applyPreset(_ preset: ProviderPreset?) {
+        guard let preset else {
+            if ProviderPresetCatalog.all.contains(where: { $0.isEndpoint(presetEndpointValue) }) {
+                if profile.metadata.nodeType == .anthropicDirect {
+                    profile.metadata.proxy.anthropicBaseURL = ""
+                } else {
+                    profile.metadata.proxy.upstreamBaseURL = ""
+                }
+            }
+            if ProviderPresetCatalog.isPresetName(profile.metadata.name) { profile.metadata.name = "" }
+            profile.syncEnvFromProxy()
+            return
+        }
+        // Claude Code 原生说 Anthropic Messages：服务商支持时优先直连，免去本地格式转换。
+        if preset.supports(.anthropic) {
+            if profile.metadata.nodeType != .anthropicDirect { interfaceChoice.wrappedValue = .anthropic }
+        } else if profile.metadata.nodeType == .anthropicDirect {
+            interfaceChoice.wrappedValue = .openAIChatCompletions
+        }
+        if profile.metadata.name.trimmingCharacters(in: .whitespaces).isEmpty
+            || ProviderPresetCatalog.isPresetName(profile.metadata.name) {
+            profile.metadata.name = preset.name
+        }
+        syncPresetEndpoint()
+    }
+
+    private func syncPresetEndpoint() {
+        guard let preset = ProviderPresetCatalog.preset(id: presetID) else { return }
+        // 两种接口各存一份 Key：同一服务商的 Key 通用，切换接口时把已粘贴的 Key 带过去。
+        switch profile.metadata.nodeType {
+        case .anthropicDirect:
+            profile.metadata.proxy.anthropicBaseURL = preset.baseURL(for: .anthropic)
+            if profile.metadata.proxy.anthropicAPIKey.isEmpty {
+                profile.metadata.proxy.anthropicAPIKey = profile.metadata.proxy.upstreamAPIKey
+            }
+        case .openaiProxy, .codexProxy:
+            profile.metadata.proxy.upstreamBaseURL = preset.openAIBaseURL
+            if profile.metadata.proxy.upstreamAPIKey.isEmpty {
+                profile.metadata.proxy.upstreamAPIKey = profile.metadata.proxy.anthropicAPIKey
+            }
+        }
+        profile.syncEnvFromProxy()
     }
 
     // MARK: - Basic Section
@@ -687,12 +778,16 @@ struct ProxyConfigEditorView: View {
                         } else {
                             Image(systemName: "arrow.clockwise")
                         }
-                        Text(L("Sync", "同步"))
+                        Text(L("Sync Models & Prices", "同步模型和价格"))
                     }
                     .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
                 .disabled(!canFetchModels)
+                .help(L(
+                    "Merges the upstream model list and fills blank prices from models.dev. Manual prices are never overwritten.",
+                    "合并上游模型列表，并用 models.dev 公开价格填充空白价格；手动价格不会被覆盖。"
+                ))
             }
 
             if let error = modelFetch.errorMessage {
@@ -700,6 +795,10 @@ struct ProxyConfigEditorView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if let fetchSummary {
+                Label(fetchSummary, systemImage: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
             } else if !modelFetch.availableModels.isEmpty {
                 Label(
                     L(
@@ -1033,9 +1132,19 @@ struct ProxyConfigEditorView: View {
         copiedClientKey = true
     }
 
-    private func mergeFetchedModelsIntoCatalog(_ models: [String]) {
-        guard !models.isEmpty else { return }
-        profile.metadata.proxy.modelCatalog.mergeModels(models)
+    /// 一次「同步模型和价格」完成后：合并上游模型，再回填空白 / 公开来源的价格。
+    private func applyFetchResult() {
+        let before = Set(profile.metadata.proxy.modelCatalog.models)
+        if !modelFetch.availableModels.isEmpty {
+            profile.metadata.proxy.modelCatalog.mergeModels(modelFetch.availableModels)
+        }
+        let added = profile.metadata.proxy.modelCatalog.models.filter { !before.contains($0) }.count
+        let priced = modelFetch.hasPriceCatalog
+            ? profile.metadata.proxy.modelCatalog.applyPublicPrices { modelFetch.publicPrice(for: $0) }
+            : 0
+        fetchSummary = (modelFetch.errorMessage == nil || priced > 0)
+            ? ModelFetchSummary.text(added: added, priced: priced, notAdded: 0)
+            : nil
     }
 
     private func deleteNode() async {

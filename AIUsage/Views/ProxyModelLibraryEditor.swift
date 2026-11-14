@@ -3,6 +3,15 @@ import SwiftUI
 
 // MARK: - Node Pricing Rules
 
+/// 价格输入框的文本格式：固定小数点、不分组。跟随系统区域格式时 1250 会显示成 "1,250"，
+/// 而输入框按 Double(text) 解析，读回来就成了 0。
+enum PriceTextFormat {
+    static let style = FloatingPointFormatStyle<Double>.number
+        .precision(.fractionLength(0...6))
+        .grouping(.never)
+        .locale(Locale(identifier: "en_US_POSIX"))
+}
+
 /// Claude / Codex 节点共用的高密度费用表。
 /// 模型目录决定“可用什么”，这里只保存明确配置过的单价；清除价格不会删除模型。
 struct ProxyPricingRulesEditor: View {
@@ -43,7 +52,8 @@ struct ProxyPricingRulesEditor: View {
 
         func pricing(currency: ProxyConfiguration.PricingCurrency) -> ProxyConfiguration.ModelPricing? {
             if isFree {
-                return ProxyConfiguration.ModelPricing(currency: currency)
+                // 保留来源：models.dev 上标价为 0 的模型仍按公开价格跟随更新；手动标记免费时来源为手动。
+                return ProxyConfiguration.ModelPricing(currency: currency, source: source)
             }
             guard hasEnteredRate else { return nil }
             return ProxyConfiguration.ModelPricing(
@@ -69,9 +79,9 @@ struct ProxyPricingRulesEditor: View {
             max(0, Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0)
         }
 
-        private static func format(_ value: Double?) -> String {
+        fileprivate static func format(_ value: Double?) -> String {
             guard let value, value != 0 else { return "" }
-            return value.formatted(.number.precision(.fractionLength(0...6)))
+            return value.formatted(PriceTextFormat.style)
         }
 
     }
@@ -128,19 +138,25 @@ struct ProxyPricingRulesEditor: View {
     }
 
     var body: some View {
+        // 过滤结果每次渲染只算一次。旧写法在每一行里重新过滤全部模型（O(n²)），
+        // 几百个模型时每敲一个键都要做数万次字符串比较，是编辑页卡顿的主因。
+        let visibleIDs = filteredDraftIDs
+        let visibleSet = Set(visibleIDs)
+        let lastVisibleID = visibleIDs.last
+
         VStack(alignment: .leading, spacing: 12) {
             toolbar
 
             VStack(spacing: 0) {
                 columnHeader
-                if filteredDraftIDs.isEmpty {
+                if visibleIDs.isEmpty {
                     emptyState
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach($drafts) { $draft in
-                            if filteredDraftIDs.contains(draft.id) {
+                            if visibleSet.contains(draft.id) {
                                 pricingRow($draft)
-                                if draft.id != filteredDraftIDs.last {
+                                if draft.id != lastVisibleID {
                                     Divider().opacity(0.45)
                                 }
                             }
@@ -168,13 +184,18 @@ struct ProxyPricingRulesEditor: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: draftsFingerprint) { _, _ in
+        .onChange(of: drafts) { _, _ in
             persistDrafts()
         }
         .onChange(of: currency) { _, newCurrency in
             convertRules(to: newCurrency)
         }
         .onChange(of: catalog.models) { _, _ in
+            syncDraftsWithCatalog()
+        }
+        // 「获取模型和价格」与后台同步会从外部改写费用规则，草稿需跟上，
+        // 否则下一次按键保存会把刚填好的价格覆盖回去。
+        .onChange(of: catalog.pricingOverrides) { _, _ in
             syncDraftsWithCatalog()
         }
     }
@@ -450,12 +471,6 @@ struct ProxyPricingRulesEditor: View {
         .map(\.id)
     }
 
-    private var draftsFingerprint: [String] {
-        drafts.map {
-            "\($0.id)|\($0.input)|\($0.output)|\($0.cacheWrite)|\($0.cacheRead)|\($0.isFree)|\($0.source?.kind.rawValue ?? "")"
-        }
-    }
-
     private var activeRuleCount: Int {
         drafts.filter { $0.isFree || $0.hasEnteredRate }.count
     }
@@ -469,12 +484,30 @@ struct ProxyPricingRulesEditor: View {
 
     private func syncDraftsWithCatalog() {
         let existing = Dictionary(uniqueKeysWithValues: drafts.map { ($0.id, $0) })
-        drafts = Self.orderedModelNames(in: catalog).map { model in
-            existing[model] ?? RuleDraft(
-                model: model,
-                pricing: catalog.pricingOverrides[model],
-                displayCurrency: currency
-            )
+        let updated = Self.orderedModelNames(in: catalog).map { model -> RuleDraft in
+            let stored = catalog.pricingOverrides[model]
+            // 草稿与目录价格一致时保留草稿（保住输入中的文本，如 "1."）；不一致说明是外部改写。
+            if let draft = existing[model], Self.draft(draft, matches: stored, currency: currency) {
+                return draft
+            }
+            return RuleDraft(model: model, pricing: stored, displayCurrency: currency)
+        }
+        guard updated != drafts else { return }
+        drafts = updated
+    }
+
+    private static func draft(
+        _ draft: RuleDraft,
+        matches stored: ProxyConfiguration.ModelPricing?,
+        currency: ProxyConfiguration.PricingCurrency
+    ) -> Bool {
+        switch (draft.pricing(currency: currency), stored) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            return lhs.hasAnyRate == rhs.hasAnyRate && PublicPriceUpdate.sameRates(lhs, rhs)
+        default:
+            return false
         }
     }
 
@@ -513,7 +546,7 @@ struct ProxyPricingRulesEditor: View {
 
     private func convertedValue(_ raw: String, factor: Double) -> String {
         guard let value = Double(raw), !raw.isEmpty else { return raw }
-        return (value * factor).formatted(.number.precision(.fractionLength(0...6)))
+        return (value * factor).formatted(PriceTextFormat.style)
     }
 
     private func applyPublicPrices(_ matches: [PublicModelPriceMatch]) {
@@ -539,6 +572,8 @@ struct ProviderModelLibraryEditor: View {
     @Binding var currency: ProxyConfiguration.PricingCurrency
     @ObservedObject var modelFetch: ModelFetchState
     let upstreamBaseURL: String?
+    var apiKey: String = ""
+    var fetchStyle: ModelListEndpointStyle = .openAICompatible
 
     private struct Row: Identifiable {
         let id = UUID()
@@ -547,17 +582,22 @@ struct ProviderModelLibraryEditor: View {
 
     @State private var rows: [Row]
     @State private var expandedExtraRows: Set<UUID> = []
+    @State private var fetchSummary: String?
 
     init(
         library: Binding<[ProxyConfiguration.MappedModel]>,
         currency: Binding<ProxyConfiguration.PricingCurrency>,
         modelFetch: ModelFetchState,
-        upstreamBaseURL: String? = nil
+        upstreamBaseURL: String? = nil,
+        apiKey: String = "",
+        fetchStyle: ModelListEndpointStyle = .openAICompatible
     ) {
         _library = library
         _currency = currency
         _modelFetch = ObservedObject(wrappedValue: modelFetch)
         self.upstreamBaseURL = upstreamBaseURL
+        self.apiKey = apiKey
+        self.fetchStyle = fetchStyle
         _rows = State(initialValue: library.wrappedValue.map { Row(model: $0) })
     }
 
@@ -591,12 +631,16 @@ struct ProviderModelLibraryEditor: View {
             }
 
             HStack(spacing: 10) {
-                PublicModelPricingImportControl(
-                    models: rows.map(\.model.name),
-                    upstreamBaseURL: upstreamBaseURL,
-                    displayCurrency: currency,
-                    onApply: applyPublicPrices
+                ModelFetchControls(
+                    state: modelFetch,
+                    baseURL: upstreamBaseURL ?? "",
+                    apiKey: apiKey,
+                    style: fetchStyle,
+                    requiresAPIKey: false,
+                    resultSummary: fetchSummary
                 )
+
+                Spacer(minLength: 8)
 
                 Button {
                     autoFillCache()
@@ -610,21 +654,23 @@ struct ProviderModelLibraryEditor: View {
                     "For blank cache prices only, use 1.25× input for cache writes and 0.1× input for cache reads.",
                     "只填充空白缓存价格：缓存写入按输入价的 1.25 倍，缓存读取按 0.1 倍。"
                 ))
-
-                Spacer()
             }
 
             FetchedModelAppendList(
                 state: modelFetch,
                 existingModels: existingNames,
                 onAppend: { appendModels([$0]) },
-                onAppendAll: { appendModels($0) }
+                onAppendAll: { appendModels($0) },
+                priceLookup: { modelFetch.publicPrice(for: $0) }
             )
 
             if !rows.isEmpty {
                 columnHeaders
-                ForEach($rows) { $row in
-                    rowView($row)
+                // 懒加载：几百个模型时只构建可见行（每行 5 个格式化输入框）。
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach($rows) { $row in
+                        rowView($row)
+                    }
                 }
             }
 
@@ -636,23 +682,14 @@ struct ProviderModelLibraryEditor: View {
             }
             .buttonStyle(.borderless)
         }
-        .onChange(of: rowsFingerprint) { _, _ in library = parsedLibrary }
+        // MappedModel 本身可比较；不再每次渲染为每行拼接排序后的指纹字符串。
+        .onChange(of: rows.map(\.model)) { _, _ in library = parsedLibrary }
+        .onChange(of: modelFetch.completedRevision) { _, _ in applyFetchResult() }
         .onChange(of: currency) { _, newCurrency in
             for index in rows.indices {
                 rows[index].model.pricing = rows[index].model.pricing.converted(to: newCurrency)
             }
             library = parsedLibrary
-        }
-    }
-
-    private var rowsFingerprint: [String] {
-        rows.map { row in
-            let p = row.model.pricing
-            let extra = row.model.extraParameters
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key)=\($0.value)" }
-                .joined(separator: ",")
-            return "\(row.model.name)|\(p.inputPerMillion)|\(p.outputPerMillion)|\(p.cacheCreatePerMillion)|\(p.cacheReadPerMillion)|\(p.currency.rawValue)|\(p.source?.kind.rawValue ?? "")|\(extra)"
         }
     }
 
@@ -760,13 +797,58 @@ struct ProviderModelLibraryEditor: View {
             .clipped()
     }
 
-    private func appendModels(_ names: [String]) {
+    /// 追加模型行；默认立即带上公开价格（不必再单独「匹配公开价格」）。
+    @discardableResult
+    private func appendModels(_ names: [String], applyPrices: Bool = true) -> Int {
         var existing = existingNames
+        var added = 0
         for rawName in names {
             let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, existing.insert(name).inserted else { continue }
             rows.append(Row(model: .init(name: name, pricing: emptyPricing)))
+            added += 1
         }
+        if applyPrices, added > 0 { applyPublicPricesToRows() }
+        return added
+    }
+
+    /// 一次「获取模型和价格」完成后：空列表且模型不多时直接全部加入，然后回填空白价格。
+    private func applyFetchResult() {
+        let fetched = modelFetch.availableModels
+        var added = 0
+        if parsedLibrary.isEmpty, !fetched.isEmpty, fetched.count <= ModelFetchSummary.autoAddLimit {
+            rows.removeAll { $0.model.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            added = appendModels(fetched, applyPrices: false)
+        }
+        let priced = applyPublicPricesToRows()
+        guard modelFetch.errorMessage == nil || priced > 0 else {
+            fetchSummary = nil
+            return
+        }
+        let names = existingNames
+        fetchSummary = ModelFetchSummary.text(
+            added: added,
+            priced: priced,
+            notAdded: fetched.filter { !names.contains($0) }.count
+        )
+    }
+
+    @discardableResult
+    private func applyPublicPricesToRows() -> Int {
+        guard modelFetch.hasPriceCatalog else { return 0 }
+        var changed = 0
+        for index in rows.indices {
+            let name = rows[index].model.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty,
+                  let updated = PublicPriceUpdate.updatedPricing(
+                    forProviderModel: rows[index].model.pricing,
+                    candidate: modelFetch.publicPrice(for: name),
+                    targetCurrency: currency
+                  ) else { continue }
+            rows[index].model.pricing = updated
+            changed += 1
+        }
+        return changed
     }
 
     private func autoFillCache() {
@@ -789,18 +871,6 @@ struct ProviderModelLibraryEditor: View {
         }
     }
 
-    private func applyPublicPrices(_ matches: [PublicModelPriceMatch]) {
-        let matchesByModel = Dictionary(uniqueKeysWithValues: matches.map { ($0.model, $0.pricing) })
-        for index in rows.indices {
-            let model = rows[index].model.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard
-                !rows[index].model.pricing.hasAnyRate,
-                let imported = matchesByModel[model]
-            else { continue }
-            rows[index].model.pricing = imported
-        }
-        library = parsedLibrary
-    }
 }
 
 // MARK: - Provider Library Slot Picker

@@ -253,6 +253,7 @@ struct ContentView: View {
 private struct SidebarFooterView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var sparkle: SparkleController
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var pulse = false
 
@@ -265,6 +266,14 @@ private struct SidebarFooterView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let version = sparkle.availableUpdateVersion {
                 updateButton(version: version)
+            }
+
+            // 合作推荐位：放在版本号上方，低对比；右键可关闭，设置页可恢复。
+            if settings.showSponsorSpot, let sponsor = ProviderPresetCatalog.featuredSponsor() {
+                SidebarSponsorSpot(preset: sponsor) {
+                    withAnimation(.easeOut(duration: 0.2)) { settings.showSponsorSpot = false }
+                }
+                .transition(.opacity)
             }
 
             HStack(spacing: 5) {
